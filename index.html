@@ -28,7 +28,7 @@
   #cardTbl td{text-align:center;padding:3px;border-bottom:1px solid #333}
   #cardTbl tr.cur td{background:#332b00}
   #cardTbl tr.sum td{font-weight:900;color:var(--y);border-top:2px solid #666}
-  #cardTbl input{width:58px;font-size:22px;text-align:center;background:#111;color:#fff;border:2px solid #555;border-radius:8px;padding:4px}
+  #cardTbl input{width:58px;min-width:44px;font-size:22px;text-align:center;background:#111;color:#fff;border:2px solid #555;border-radius:8px;padding:4px}
   #cardTbl td.hn{font-weight:900;color:var(--y)}
   .learned{font-size:15px;color:#bbb;margin:-2px 0 8px 4px}
   .learned button{background:#333;color:#fff;border:0;border-radius:8px;padding:3px 8px;font-size:14px;margin-left:6px}
@@ -55,6 +55,7 @@
   .big{font-size:30px;font-weight:800}
   select,input[type=number]{background:#111;color:var(--fg);border:3px solid #555;border-radius:12px;
     padding:10px;font-size:24px;width:100%}
+  input:focus,select:focus{outline:none;border-color:var(--y)}
   label{display:block;margin:12px 0 4px;font-weight:700}
 
   /* film */
@@ -82,10 +83,32 @@
   #fsub{font-size:19px;color:var(--dim)}
   #find .btns{width:100%}
   a{color:var(--y)}
-  .clubrow{display:flex;gap:8px;align-items:center;margin:6px 0}
-  .clubrow input[type=text]{flex:2;background:#111;color:#fff;border:2px solid #555;border-radius:10px;padding:8px;font-size:20px}
-  .clubrow input[type=number]{flex:1;font-size:20px;padding:8px}
-  .clubrow button{flex:0 0 52px;min-height:46px;border-radius:10px;border:0;background:#333;color:#fff;font-size:22px}
+  .clubrow{display:flex;gap:6px;align-items:center;margin:6px 0}
+  .clubrow input[type=text]{flex:1 1 auto;min-width:0;width:0;background:#111;color:#fff;border:2px solid #555;border-radius:10px;padding:8px;font-size:20px}
+  .clubrow input[type=number]{flex:0 0 84px;width:84px;min-width:84px;font-size:24px;font-weight:800;padding:6px 4px;text-align:center}
+  .clubrow button{flex:0 0 44px;min-height:46px;border-radius:10px;border:0;background:#333;color:#fff;font-size:20px}
+  /* number boxes: no spinner arrows eating the space */
+  input[type=number]{-moz-appearance:textfield;appearance:textfield}
+  input[type=number]::-webkit-inner-spin-button,input[type=number]::-webkit-outer-spin-button{-webkit-appearance:none;margin:0}
+  input,select{min-width:0;max-width:100%}
+  /* narrow screens (Fold front screen, small phones) */
+  @media (max-width:400px){
+    html,body{font-size:18px}
+    h1{font-size:32px} h2{font-size:24px}
+    .screen{padding-left:8px;padding-right:8px}
+    .btn{font-size:22px;min-height:60px}
+    .btn.small{font-size:18px;min-height:50px}
+    .row{gap:6px}
+    #cardTbl{font-size:17px;table-layout:fixed}
+    #cardTbl th,#cardTbl td{padding:2px 1px}
+    #cardTbl th:nth-child(4),#cardTbl td:nth-child(4){display:none}  /* hide Hcp column */
+    #cardTbl input{width:100%;max-width:60px;font-size:20px;padding:4px 0}
+    .distbox .val{font-size:34px}
+    .distbox button{padding:6px 2px}
+    #mini{width:118px} #miniC{width:108px;height:120px} #miniYd{font-size:26px}
+    #fdist{font-size:64px} #fturn{font-size:28px}
+    #cardTot{font-size:20px}
+  }
 </style>
 </head>
 <body>
