@@ -135,7 +135,7 @@
 <section id="help" class="screen">
   <div class="scroll">
     <h2>How it works</h2>
-    <p><b>1. Line up.</b> Your friend stands about 4 big steps straight behind the ball, looking down the target line, and holds the phone upright. They step forward or back until you fit inside the yellow box.</p>
+    <p><b>1. Line up.</b> Your friend stands 3–5 steps straight behind the ball, out of the swing, looking down the target line. They hold the phone level at chest height with the ball in the circle. The "steps" chip turns green at a good distance. The golfer doesn't need to be in view.</p>
     <p><b>2. Ready.</b> Tap READY. The app listens for the hit, then tries to trace the ball.</p>
     <p><b>3. Mark.</b> Your friend watches the ball land, puts the <b>+</b> on the spot where it came down and taps MARK. This is the most accurate step.</p>
     <p><b>4. Distance.</b> The app uses your club's usual carry. Adjust it with Short / Long or ±10 if the shot was mishit.</p>
@@ -212,6 +212,7 @@
   <div id="topbar">
     <span class="chip" id="cLevel">Level</span>
     <span class="chip" id="cSteady">Steady</span>
+    <span class="chip" id="cDist">Distance…</span>
     <span class="chip" id="cGps">GPS…</span>
     <span class="chip" id="cHead">Compass…</span>
   </div>
@@ -516,7 +517,18 @@ function hfov() {   // horizontal field of view of the video, degrees (typical p
   return VW < VH ? shortFov : longFov;
 }
 function angleFromX(x) { const f = (VW / 2) / Math.tan(rad(hfov() / 2)); return deg(Math.atan((x - VW / 2) / f)); }
-function defaultBall() { const m = coverMap(); const p = s2v(m, overlay.clientWidth * 0.5, overlay.clientHeight * 0.78); return { x: p[0], y: p[1] }; }
+// estimate distance from phone to ball: phone tilt + where the ball sits in the picture
+// (assumes the phone is held at about chest height, 1.35 m)
+function ballDistM() {
+  if (S.beta == null || !VW) return null;
+  const b = S.ballV || defaultBall();
+  const vfov = VW < VH ? 67 : deg(2 * Math.atan(Math.tan(rad(33.5)) * VH / VW));
+  const fy = (VH / 2) / Math.tan(rad(vfov / 2));
+  const dep = (90 - S.beta) + deg(Math.atan((b.y - VH / 2) / fy));   // degrees below level
+  if (dep < 4) return null;
+  return 1.35 / Math.tan(rad(dep));
+}
+function defaultBall() { const m = coverMap(); const p = s2v(m, overlay.clientWidth * 0.5, overlay.clientHeight * 0.82); return { x: p[0], y: p[1] }; }
 
 /* luminance of an RGBA buffer */
 function lum(d, n) { const L = new Uint8Array(n); for (let i = 0, j = 0; i < n; i++, j += 4) L[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8; return L; }
@@ -666,7 +678,7 @@ function setMode(m) {
     const n = cfg.rangeShots.filter(s => s.t > S.rangeStart).length;
     msg.innerHTML = S.rangeTarget == null
       ? "RANGE: Stand behind the ball, put the <b>+</b> on your target flag and tap SET TARGET."
-      : `RANGE · ${n} shot${n === 1 ? "" : "s"} this session. Golfer in the box, then READY.`;
+      : `RANGE · ${n} shot${n === 1 ? "" : "s"} this session. Ball in the circle, then READY.`;
     body.innerHTML = `${clubSel()}<div class="row"><button class="btn alt small" id="bSetT">${S.rangeTarget == null ? "SET TARGET" : "Re-aim target"}</button>
       <button class="btn alt small" id="bStats">Stats</button></div>
       <div class="row"><button class="btn alt small" id="bBack">Exit</button><button class="btn" id="bReady">READY</button></div>`;
@@ -677,7 +689,7 @@ function setMode(m) {
     $("bReady").onclick = () => { if (S.rangeTarget == null) S.rangeTarget = trueHeading();
       if (!S.ballV) S.ballV = defaultBall(); S.armed = true; S.armedAt = performance.now(); hasPrevFull = false; setMode("armed"); };
   } else if (m === "setup") {
-    msg.innerHTML = "Stand ~4 big steps behind the ball. Step closer or back until the golfer fills the box, head to feet. The ball goes in the circle (tap the ball if it isn't).";
+    msg.innerHTML = "Stand 3–5 steps straight behind the ball, out of the swing. Hold the phone level at chest height with the ball in the circle (tap the ball if it isn't). The golfer doesn't need to be in view.";
     body.innerHTML = `${clubSel()}<div class="row"><button class="btn alt small" id="bBack">Back</button><button class="btn" id="bReady">READY</button></div>`;
     $("bBack").onclick = () => show("home");
     $("bReady").onclick = () => { if (!S.ballV) S.ballV = defaultBall(); S.armed = true; S.armedAt = performance.now(); hasPrevFull = false; setMode("armed"); };
@@ -773,16 +785,13 @@ function drawOverlay() {
   const m = coverMap();
   octx.lineCap = "round";
   if (S.mode === "setup" || S.mode === "armed") {
-    // golfer box: golfer stands left of the ball (right-hander, seen from behind)
-    const left = cfg.hand === "R";
-    const bx = left ? W * 0.10 : W * 0.58, bw = W * 0.32, by = H * 0.45, bh = H * 0.34;
-    octx.strokeStyle = "#FFD60A"; octx.lineWidth = 4; octx.setLineDash([14, 10]);
-    octx.strokeRect(bx, by, bw, bh); octx.setLineDash([]);
-    octx.fillStyle = "#FFD60A"; octx.font = "bold 18px system-ui";
-    octx.fillText("golfer's head", bx + 2, by - 8); octx.fillText("golfer's feet", bx + 2, by + bh + 22);
-    const b = S.ballV ? v2s(m, S.ballV.x, S.ballV.y) : [W * 0.5, H * 0.78];
-    octx.lineWidth = 4; octx.beginPath(); octx.arc(b[0], b[1], 22, 0, Math.PI * 2); octx.stroke();
-    octx.fillText("ball", b[0] + 28, b[1] + 6);
+    // ball circle + a quick distance check from the phone's tilt (no need to fit the whole golfer)
+    const b = S.ballV ? v2s(m, S.ballV.x, S.ballV.y) : [W * 0.5, H * 0.82];
+    const dm = ballDistM(), ok = dm != null && dm >= 1.8 && dm <= 5;
+    octx.strokeStyle = dm == null ? "#FFD60A" : ok ? "#3BE37A" : "#FF5A4E"; octx.fillStyle = octx.strokeStyle;
+    octx.lineWidth = 5; octx.beginPath(); octx.arc(b[0], b[1], 24, 0, Math.PI * 2); octx.stroke();
+    octx.font = "bold 20px system-ui"; octx.fillText("ball", b[0] + 30, b[1] + 7);
+    octx.strokeStyle = "#FFD60A";
     // target line
     octx.globalAlpha = 0.5; octx.beginPath(); octx.moveTo(b[0], b[1] - 26); octx.lineTo(W * 0.5, H * 0.12); octx.stroke(); octx.globalAlpha = 1;
   }
@@ -819,6 +828,13 @@ function updateChips() {
   chip("cSteady", S.steady > 1.2 ? "Hold steady" : "Steady ✓", S.steady > 1.2 ? "bad" : "ok");
   if (!S.pos) chip("cGps", "GPS…", "bad");
   else chip("cGps", "GPS ±" + Math.round(S.acc * YD) + "yd", S.acc < 12 ? "ok" : "bad");
+  const dm = (S.mode === "setup" || S.mode === "armed") ? ballDistM() : null, steps = dm == null ? null : Math.round(dm / 0.75);
+  if (S.mode !== "setup" && S.mode !== "armed") chip("cDist", "", "");
+  else if (dm == null) chip("cDist", "Aim at ball", "bad");
+  else if (dm < 1.8) chip("cDist", "Too close: step back", "bad");
+  else if (dm > 5) chip("cDist", `${steps} steps: move closer`, "bad");
+  else chip("cDist", `${steps} steps ✓`, "ok");
+  $("cDist").style.display = (S.mode === "setup" || S.mode === "armed") ? "" : "none";
   const h = trueHeading();
   chip("cHead", h == null ? "Compass…" : "Facing " + DIRS[Math.round(h / 45) % 8], h == null ? "bad" : "ok");
 }
