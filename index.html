@@ -677,7 +677,7 @@ function setMode(m) {
     $("bReady").onclick = () => { if (S.rangeTarget == null) S.rangeTarget = trueHeading();
       if (!S.ballV) S.ballV = defaultBall(); S.armed = true; S.armedAt = performance.now(); hasPrevFull = false; setMode("armed"); };
   } else if (m === "setup") {
-    msg.innerHTML = "Stand ~4 big steps behind the ball. Fit the golfer in the box. Tap the ball if it isn't in the circle.";
+    msg.innerHTML = "Stand ~4 big steps behind the ball. Step closer or back until the golfer fills the box, head to feet. The ball goes in the circle (tap the ball if it isn't).";
     body.innerHTML = `${clubSel()}<div class="row"><button class="btn alt small" id="bBack">Back</button><button class="btn" id="bReady">READY</button></div>`;
     $("bBack").onclick = () => show("home");
     $("bReady").onclick = () => { if (!S.ballV) S.ballV = defaultBall(); S.armed = true; S.armedAt = performance.now(); hasPrevFull = false; setMode("armed"); };
@@ -779,7 +779,7 @@ function drawOverlay() {
     octx.strokeStyle = "#FFD60A"; octx.lineWidth = 4; octx.setLineDash([14, 10]);
     octx.strokeRect(bx, by, bw, bh); octx.setLineDash([]);
     octx.fillStyle = "#FFD60A"; octx.font = "bold 18px system-ui";
-    octx.fillText("head", bx + 6, by - 8); octx.fillText("feet", bx + 6, by + bh + 22);
+    octx.fillText("golfer's head", bx + 2, by - 8); octx.fillText("golfer's feet", bx + 2, by + bh + 22);
     const b = S.ballV ? v2s(m, S.ballV.x, S.ballV.y) : [W * 0.5, H * 0.78];
     octx.lineWidth = 4; octx.beginPath(); octx.arc(b[0], b[1], 22, 0, Math.PI * 2); octx.stroke();
     octx.fillText("ball", b[0] + 28, b[1] + 6);
@@ -860,14 +860,38 @@ function featKind(t) {
   if (g === "hole") return "hole";
   return null;
 }
+// OpenStreetMap query servers: the main one is often busy, so fall back to mirrors and retry
+const OVERPASS = [
+  "https://overpass-api.de/api/interpreter",
+  "https://overpass.private.coffee/api/interpreter",
+  "https://overpass.kumi.systems/api/interpreter",
+  "https://maps.mail.ru/osm/tools/overpass/api/interpreter"
+];
+async function overpass(q, onTry) {
+  let last = "no signal";
+  for (let round = 0; round < 2; round++) {
+    for (let i = 0; i < OVERPASS.length; i++) {
+      if (onTry) onTry(round * OVERPASS.length + i + 1, OVERPASS.length * 2);
+      const ctl = new AbortController(), timer = setTimeout(() => ctl.abort(), 45000);
+      try {
+        const r = await fetch(OVERPASS[i], { method: "POST", body: "data=" + encodeURIComponent(q), signal: ctl.signal,
+          headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+        clearTimeout(timer);
+        if (!r.ok) { last = "server busy (" + r.status + ")"; continue; }
+        const j = await r.json();
+        if (j.remark && /error|timed out|out of memory/i.test(j.remark)) { last = "server overloaded"; continue; }
+        return j;
+      } catch (e) { clearTimeout(timer); last = e.name === "AbortError" ? "server too slow" : "couldn't reach server"; }
+    }
+    await new Promise(r => setTimeout(r, 3000));   // short pause before a second round
+  }
+  throw new Error(last);
+}
 // download golf features (greens, fairways, bunkers, water, hole lines) in a box around a point
-async function fetchFeats(t, d) {
+async function fetchFeats(t, d, onTry) {
   const bb = `${t.lat - d},${t.lon - d * 1.4},${t.lat + d},${t.lon + d * 1.4}`;
-  const q = `[out:json][timeout:40];(way["golf"](${bb});relation["golf"](${bb});way["natural"~"water|sand"](${bb});relation["natural"="water"](${bb}););out geom;`;
-  const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q),
-    headers: { "Content-Type": "application/x-www-form-urlencoded" } });
-  if (!r.ok) throw new Error("map server busy (" + r.status + ")");
-  const j = await r.json(), out = [], r6 = v => Math.round(v * 1e6) / 1e6;
+  const q = `[out:json][timeout:60];(way["golf"](${bb});relation["golf"](${bb});way["natural"~"water|sand"](${bb});relation["natural"="water"](${bb}););out geom;`;
+  const j = await overpass(q, onTry), out = [], r6 = v => Math.round(v * 1e6) / 1e6;
   for (const el of j.elements || []) {
     const kind = featKind(el.tags || {}); if (!kind) continue;
     const rings = [];
@@ -878,8 +902,8 @@ async function fetchFeats(t, d) {
   return out;
 }
 // save a course's map on the phone so it works with weak signal on the course
-async function cacheCourse(c) {
-  const feats = await fetchFeats({ lat: c.lat, lon: c.lon }, 0.014);   // ~3 km square
+async function cacheCourse(c, onTry) {
+  const feats = await fetchFeats({ lat: c.lat, lon: c.lon }, 0.014, onTry);   // ~3 km square
   c.feats = feats; c.featsT = Date.now();
   if (!saveCfg()) { delete c.feats; saveCfg(); throw new Error("not enough phone storage"); }
   COURSE.center = null; COURSE.status = ""; COURSE.savedId = null;   // pick up the saved copy next time
@@ -981,6 +1005,8 @@ function pickHole(p, h) {
 }
 function miniTick() {
   const hole = $("miniHole"), yd = $("miniYd"), fb = $("miniFB"), cv = $("miniC");
+  const cc = curCourse();
+  if (cc && cc.feats && (!S.pos || geoDist(S.pos, cc) > 1800)) { miniPreview(cc); return; }
   if (!S.pos) { hole.textContent = "GPS…"; yd.textContent = ""; fb.textContent = ""; return; }
   loadCourse(S.pos);
   const h = trueHeading();
@@ -994,7 +1020,7 @@ function miniTick() {
   }
   const card = cardOf(curCourse()), hi = (cfg.curHole || 1) - 1;
   const par = card ? card.par[hi] : null, cardYd = card ? card.yards[teeName(card)][hi] : 0;
-  hole.textContent = `Hole ${cfg.curHole || 1}${par ? " · Par " + par : ""}`;
+  hole.innerHTML = `Hole ${cfg.curHole || 1}${par ? "<br>Par " + par : ""}`;
   if (!sel) {
     yd.textContent = cardYd ? cardYd + " yd" : "";
     fb.textContent = COURSE.status === "loading" ? "Loading map…" : COURSE.status === "empty" ? "Card yards · course not mapped"
@@ -1013,27 +1039,66 @@ function miniTick() {
   if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
   const x = cv.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0);
   x.fillStyle = "#16301c"; x.fillRect(0, 0, W, H);
-  const hd = rad(h == null ? 0 : h), sinH = Math.sin(hd), cosH = Math.cos(hd);
   const range = sel ? geoDist(S.pos, { lat: greenCenter(sel.green)[0], lon: greenCenter(sel.green)[1] }) + 40 : 300;
   const mpp = Math.max(0.4, range / (H - 22)), ox = W / 2, oy = H - 12;
-  const P = (lat, lon) => { const [e, n] = toLocal(S.pos, lat, lon);
+  drawFeats(x, COURSE.feats, S.pos, h || 0, mpp, ox, oy, sel && sel.green, true);
+}
+// draw course features with `origin` at (ox,oy) and bearing `up` pointing up the screen
+function drawFeats(x, feats, origin, up, mpp, ox, oy, green, youArrow) {
+  const hd = rad(up), sinH = Math.sin(hd), cosH = Math.cos(hd);
+  const P = (lat, lon) => { const [e, n] = toLocal(origin, lat, lon);
     return [ox + (e * cosH - n * sinH) / mpp, oy - (e * sinH + n * cosH) / mpp]; };
   const order = ["rough", "fairway", "tee", "water", "bunker", "green", "hole"];
-  for (const k of order) for (const f of COURSE.feats) {
+  for (const k of order) for (const f of feats) {
     if (f.kind !== k) continue;
-    const st = FEAT_STYLE[k]; x.beginPath();
+    x.beginPath();
     f.ring.forEach((q, i) => { const s = P(q[0], q[1]); i ? x.lineTo(s[0], s[1]) : x.moveTo(s[0], s[1]); });
     if (k === "hole") { x.setLineDash([4, 4]); x.strokeStyle = "#FFD60A88"; x.lineWidth = 1.5; x.stroke(); x.setLineDash([]); continue; }
-    x.closePath(); x.globalAlpha = k === "rough" ? 0.25 : 0.85; x.fillStyle = st.color; x.fill(); x.globalAlpha = 1;
+    x.closePath(); x.globalAlpha = k === "rough" ? 0.25 : 0.85; x.fillStyle = FEAT_STYLE[k].color; x.fill(); x.globalAlpha = 1;
   }
-  if (sel) {
-    x.beginPath(); sel.green.ring.forEach((q, i) => { const s = P(q[0], q[1]); i ? x.lineTo(s[0], s[1]) : x.moveTo(s[0], s[1]); });
+  if (green) {
+    x.beginPath(); green.ring.forEach((q, i) => { const s = P(q[0], q[1]); i ? x.lineTo(s[0], s[1]) : x.moveTo(s[0], s[1]); });
     x.closePath(); x.strokeStyle = "#FFD60A"; x.lineWidth = 3; x.stroke();
-    const c = greenCenter(sel.green), s = P(c[0], c[1]);
+    const c = greenCenter(green), s = P(c[0], c[1]);
     x.setLineDash([5, 5]); x.strokeStyle = "#FFD60A"; x.lineWidth = 2; x.beginPath(); x.moveTo(ox, oy); x.lineTo(s[0], s[1]); x.stroke(); x.setLineDash([]);
   }
-  x.fillStyle = "#2D7DFF"; x.strokeStyle = "#fff"; x.lineWidth = 2;
-  x.beginPath(); x.moveTo(ox, oy - 9); x.lineTo(ox + 7, oy + 6); x.lineTo(ox - 7, oy + 6); x.closePath(); x.fill(); x.stroke();
+  if (youArrow) {
+    x.fillStyle = "#2D7DFF"; x.strokeStyle = "#fff"; x.lineWidth = 2;
+    x.beginPath(); x.moveTo(ox, oy - 9); x.lineTo(ox + 7, oy + 6); x.lineTo(ox - 7, oy + 6); x.closePath(); x.fill(); x.stroke();
+  }
+}
+// away from the course (or no GPS yet): preview the current hole from the saved map
+function miniPreview(cc) {
+  const cv = $("miniC"), card = cardOf(cc), n = cfg.curHole || 1, hi = n - 1;
+  const par = card.par[hi], cardYd = card.yards[teeName(card)][hi];
+  $("miniHole").innerHTML = `Hole ${n}${par ? "<br>Par " + par : ""}`;
+  $("miniYd").textContent = cardYd ? cardYd + " yd" : "";
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W) return;
+  if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  const x = cv.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  x.fillStyle = "#16301c"; x.fillRect(0, 0, W, H);
+  const feats = cc.feats;
+  if (!feats.length) { $("miniFB").textContent = "Card yards · course not mapped"; return; }
+  const holeF = feats.find(f => f.kind === "hole" && String(f.ref) === String(n) && f.ring.length > 1);
+  if (holeF) {   // tee at the bottom, green at the top
+    const a = holeF.ring[0], b = holeF.ring[holeF.ring.length - 1], tee = { lat: a[0], lon: a[1] }, end = { lat: b[0], lon: b[1] };
+    let green = null, gd = Infinity;
+    feats.forEach(f => { if (f.kind !== "green") return; const c = greenCenter(f), d = geoDist(end, { lat: c[0], lon: c[1] }); if (d < gd) { gd = d; green = f; } });
+    const mpp = Math.max(0.4, (geoDist(tee, end) + 40) / (H - 22));
+    drawFeats(x, feats, tee, geoBearing(tee, end), mpp, W / 2, H - 12, green, false);
+    x.fillStyle = "#fff"; x.beginPath(); x.arc(W / 2, H - 12, 5, 0, Math.PI * 2); x.fill();
+    $("miniFB").textContent = "Preview (card yards)";
+  } else {         // no hole lines: whole-course overview, north up
+    let la = [], lo = [];
+    feats.forEach(f => { if (f.kind === "green" || f.kind === "fairway" || f.kind === "tee") f.ring.forEach(q => { la.push(q[0]); lo.push(q[1]); }); });
+    if (!la.length) feats.forEach(f => f.ring.forEach(q => { la.push(q[0]); lo.push(q[1]); }));
+    const mid = { lat: (Math.min(...la) + Math.max(...la)) / 2, lon: (Math.min(...lo) + Math.max(...lo)) / 2 };
+    const spanN = (Math.max(...la) - Math.min(...la)) * 110540, spanE = (Math.max(...lo) - Math.min(...lo)) * 111320 * Math.cos(rad(mid.lat));
+    const mpp = Math.max(spanN / (H - 8), spanE / (W - 8), 0.4);
+    drawFeats(x, feats, mid, 0, mpp, W / 2, H / 2, null, false);
+    $("miniFB").textContent = "Map saved ✓";
+  }
 }
 $("mini").addEventListener("click", e => { e.stopPropagation(); if (e.target.tagName !== "BUTTON") $("mini").classList.toggle("collapsed"); });
 const stepHole = d => { cfg.curHole = ((cfg.curHole || 1) - 1 + d + 18) % 18 + 1; saveCfg(); S.miniT = 0; };
@@ -1304,9 +1369,7 @@ $("bNear").onclick = async () => {
     const p = await getHere();
     $("courseMsg").textContent = "Searching nearby courses…";
     const q = `[out:json][timeout:25];nwr["leisure"="golf_course"](around:40000,${p.lat},${p.lon});out center tags 60;`;
-    const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q),
-      headers: { "Content-Type": "application/x-www-form-urlencoded" } });
-    const j = await r.json();
+    const j = await overpass(q, n => { if (n > 1) $("courseMsg").textContent = `Server busy, trying another (${n})…`; });
     const list = (j.elements || []).map(e => {
       const c = e.center || { lat: e.lat, lon: e.lon }; if (!c.lat) return null;
       return { name: (e.tags && e.tags.name) || "Unnamed golf course", lat: c.lat, lon: c.lon, yd: Math.round(geoDist(p, c) * YD) };
@@ -1329,8 +1392,13 @@ $("bCourseQ").onclick = async () => {
 $("bDlMap").onclick = async () => {
   const c = curCourse(); if (!c) return;
   $("mapState").textContent = "Downloading map…"; $("mapState").style.color = "var(--dim)";
-  try { await cacheCourse(c); renderCourses(); }
-  catch (e) { $("mapState").textContent = "Couldn't download: " + (e.message || "no signal") + ". Try again on Wi-Fi."; $("mapState").style.color = "var(--bad)"; }
+  const btn = $("bDlMap"); btn.disabled = true;
+  try {
+    await cacheCourse(c, (n, of) => { $("mapState").textContent = n === 1 ? "Downloading map…" : `Server busy, trying another (${n} of ${of})…`; });
+    renderCourses();
+  }
+  catch (e) { $("mapState").textContent = "Couldn't download: " + (e.message || "no signal") + ". All map servers were busy. Try again in a few minutes."; $("mapState").style.color = "var(--bad)"; }
+  btn.disabled = false;
 };
 $("bCourse").onclick = () => { renderCourses(); $("courseResults").innerHTML = ""; $("courseMsg").textContent = ""; show("courses"); };
 
