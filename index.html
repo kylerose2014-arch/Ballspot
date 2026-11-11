@@ -20,6 +20,18 @@
   #miniYd{font-size:32px;font-weight:900;color:#FFD60A;line-height:1.05}
   #miniFB{font-size:14px;color:#ddd}
   #mini.collapsed #miniC,#mini.collapsed #miniFB{display:none}
+  .holeNav{display:flex;align-items:center;gap:2px}
+  .holeNav button{flex:0 0 30px;height:30px;border:0;border-radius:8px;background:#333;color:#fff;font-size:18px;font-weight:900;padding:0}
+  .holeNav #miniHole{flex:1}
+  #cardTbl{width:100%;border-collapse:collapse;font-size:20px}
+  #cardTbl th{color:var(--y);font-size:16px;padding:4px;position:sticky;top:0;background:#000}
+  #cardTbl td{text-align:center;padding:3px;border-bottom:1px solid #333}
+  #cardTbl tr.cur td{background:#332b00}
+  #cardTbl tr.sum td{font-weight:900;color:var(--y);border-top:2px solid #666}
+  #cardTbl input{width:58px;font-size:22px;text-align:center;background:#111;color:#fff;border:2px solid #555;border-radius:8px;padding:4px}
+  #cardTbl td.hn{font-weight:900;color:var(--y)}
+  .learned{font-size:15px;color:#bbb;margin:-2px 0 8px 4px}
+  .learned button{background:#333;color:#fff;border:0;border-radius:8px;padding:3px 8px;font-size:14px;margin-left:6px}
   :root{--y:#FFD60A;--bg:#000;--fg:#fff;--dim:#bbb;--ok:#3BE37A;--bad:#FF5A4E;}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
@@ -87,6 +99,8 @@
     <p id="envWarn" style="color:var(--bad);font-weight:700">If you can read this line, the app's code isn't running. Open it from its https web address in Safari or Chrome, not from a file preview.</p>
     <button class="btn" id="bStart">START</button>
     <button class="btn alt" id="bResume" style="display:none">Resume finding last ball</button>
+    <button class="btn alt small" id="bCourse">Course: <span id="homeCourse">none</span></button>
+    <button class="btn alt small" id="bCard">Scorecard</button>
     <button class="btn alt small" id="bSettings">Clubs &amp; settings</button>
     <button class="btn alt small" id="bHelp">How it works</button>
     <p id="homeErr" style="color:var(--bad)"></p>
@@ -108,10 +122,37 @@
   <button class="btn" data-go="home">Back</button>
 </section>
 
+<!-- COURSES -->
+<section id="courses" class="screen">
+  <div class="scroll">
+    <h2>Your course</h2>
+    <p class="big" id="courseCur"></p>
+    <div id="courseSaved"></div>
+    <h2>Find a course</h2>
+    <button class="btn small" id="bNear">Courses near me</button>
+    <div class="row"><input type="text" id="courseQ" placeholder="Course name or town"
+      style="flex:3;background:#111;color:#fff;border:3px solid #555;border-radius:12px;padding:10px;font-size:22px">
+      <button class="btn small" id="bCourseQ" style="flex:1;margin:0">Search</button></div>
+    <p id="courseMsg" class="muted"></p>
+    <div id="courseResults"></div>
+  </div>
+  <button class="btn" data-go="home">Done</button>
+</section>
+
+<!-- SCORECARD -->
+<section id="card" class="screen">
+  <h2 id="cardTitle">Scorecard</h2>
+  <div class="row"><select id="teeSel"></select><button class="btn alt small" id="bCardEdit" style="margin:0">Edit card</button></div>
+  <div class="scroll" style="margin-top:8px"><table id="cardTbl"></table></div>
+  <div id="cardTot" class="big" style="margin:8px 0;text-align:center"></div>
+  <div class="row"><button class="btn alt small" id="bNewRound">New round</button><button class="btn small" data-go="home">Done</button></div>
+</section>
+
 <!-- SETTINGS -->
 <section id="settings" class="screen">
   <div class="scroll">
-    <h2>Clubs (carry yards)</h2>
+    <h2>Clubs: your carry (yards)</h2>
+    <p class="muted">Type your carry for each club if you know it. The app starts from that number and blends in real shots each time you tap "Learn from this shot."</p>
     <div id="clubList"></div>
     <button class="btn alt small" id="bAddClub">+ Add club</button>
     <label>Golfer hits</label>
@@ -139,7 +180,7 @@
   </div>
   <div id="mini" aria-live="polite">
     <canvas id="miniC"></canvas>
-    <div id="miniHole">GPS…</div>
+    <div class="holeNav"><button id="bHoleP" aria-label="Previous hole">‹</button><div id="miniHole">GPS…</div><button id="bHoleN" aria-label="Next hole">›</button></div>
     <div id="miniYd"></div>
     <div id="miniFB"></div>
   </div>
@@ -191,7 +232,7 @@
     <p class="big" id="foundTxt"></p>
     <p id="foundTxt2"></p>
   </div>
-  <button class="btn" id="bLearn">Update club distance</button>
+  <button class="btn" id="bLearn">Learn from this shot</button>
   <button class="btn alt" id="bNext">Next shot</button>
 </section>
 
@@ -231,7 +272,22 @@ const DIRS = ['N','NE','E','SE','S','SW','W','NW'];
 const DEF = {
   clubs: [["Driver",200],["3 Wood",180],["5 Wood",170],["Hybrid",165],["5 Iron",155],["6 Iron",145],
           ["7 Iron",135],["8 Iron",125],["9 Iron",115],["PW",105],["GW",95],["SW",80],["LW",60]],
-  hand: "R", decl: 0, sound: true, voice: true, mic: true, club: "Driver"
+  hand: "R", decl: 0, sound: true, voice: true, mic: true, club: "Driver",
+  courses: [{
+    id: "pryor-elmer", name: "Pryor Creek – Elmer Link", lat: 45.881, lon: -108.309,
+    card: {
+      tees: ["Blue", "White", "Gold", "Red"],
+      par: [4,3,5,4,3,5,4,4,4, 4,5,3,4,4,3,4,4,5],
+      hcp: [3,17,7,11,15,5,13,9,1, 8,2,18,4,14,16,12,10,6],
+      yards: {
+        Blue:  [443,168,583,365,210,549,404,394,462, 376,605,159,414,382,185,321,375,586],
+        White: [417,139,535,326,135,517,374,377,447, 358,585,136,381,351,170,304,348,560],
+        Gold:  [405,132,529,313,128,501,361,368,440, 345,565,125,371,343,165,299,340,548],
+        Red:   [377,118,510,307,118,481,343,273,430, 327,518,110,328,318,146,290,284,523]
+      }
+    }
+  }],
+  courseId: "pryor-elmer", tee: "White", curHole: 1, scores: {}
 };
 function loadCfg() {
   try { const s = JSON.parse(localStorage.getItem("bs_cfg")); if (s) return Object.assign(JSON.parse(JSON.stringify(DEF)), s); } catch (e) {}
@@ -253,7 +309,20 @@ function flash(id, ok) {
 function saveShot() { try { localStorage.setItem("bs_shot", JSON.stringify(S.shot)); } catch (e) {} }
 function loadShot() { try { return JSON.parse(localStorage.getItem("bs_shot")); } catch (e) { return null; } }
 let cfg = loadCfg();
-const clubCarry = name => { const c = cfg.clubs.find(c => c[0] === name); return c ? c[1] : 150; };
+// club = [name, your carry, learned average, learned shot count]
+// Your number counts like 3 shots, so real shots gradually take over.
+const clubCarry = name => {
+  const c = cfg.clubs.find(c => c[0] === name); if (!c) return 150;
+  const n = c[3] || 0; return n ? Math.round((c[1] * 3 + c[2] * n) / (3 + n)) : c[1];
+};
+const esc = s => String(s).replace(/[&<>"]/g, ch => ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" })[ch]);
+const curCourse = () => cfg.courses.find(c => c.id === cfg.courseId) || null;
+function cardOf(c) {
+  if (!c) return null;
+  if (!c.card) c.card = { tees: ["My tees"], par: Array(18).fill(4), hcp: Array.from({ length: 18 }, (_, i) => i + 1), yards: { "My tees": Array(18).fill(0) } };
+  return c.card;
+}
+const teeName = card => card.tees.includes(cfg.tee) ? cfg.tee : card.tees[0];
 
 /* ---------- state ---------- */
 const S = {
@@ -272,7 +341,10 @@ function show(id) {
   document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id));
   if (id !== "film") stopCamera();
   if (id !== "find") stopFinder();
-  if (id === "home") $("bResume").style.display = S.shot ? "block" : "none";
+  if (id === "home") {
+    $("bResume").style.display = S.shot ? "block" : "none";
+    const c = curCourse(); $("homeCourse").textContent = c ? c.name : "none";
+  }
 }
 document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => show(b.dataset.go));
 $("bHelp").onclick = () => show("help");
@@ -808,18 +880,25 @@ function miniTick() {
   const sel = S.sel;
   // the ball is ~4 m in front of the person filming
   const ballPos = h != null ? geoDest(S.pos, h, 4) : S.pos;
-  if (COURSE.status === "loading") hole.textContent = "Loading course…";
-  else if (COURSE.status === "empty") hole.textContent = "Course not mapped";
-  else if (COURSE.status === "error") hole.textContent = "No map (signal?)";
-  else if (!sel) hole.textContent = "Point at the green";
-  else hole.textContent = sel.hole && sel.hole.ref ? `Hole ${sel.hole.ref}${sel.hole.par ? " · Par " + sel.hole.par : ""}` : "To green";
+  // hole number: from the course map when it has hole lines, otherwise the ‹ › buttons
+  if (sel && sel.hole && /^\d+$/.test(sel.hole.ref || "") && !S.armed && !S.tracking) {
+    const n = +sel.hole.ref; if (n >= 1 && n <= 18 && n !== cfg.curHole) { cfg.curHole = n; saveCfg(); }
+  }
+  const card = cardOf(curCourse()), hi = (cfg.curHole || 1) - 1;
+  const par = card ? card.par[hi] : null, cardYd = card ? card.yards[teeName(card)][hi] : 0;
+  hole.textContent = `Hole ${cfg.curHole || 1}${par ? " · Par " + par : ""}`;
+  if (!sel) {
+    yd.textContent = cardYd ? cardYd + " yd" : "";
+    fb.textContent = COURSE.status === "loading" ? "Loading map…" : COURSE.status === "empty" ? "Card yards · course not mapped"
+      : COURSE.status === "error" ? "Card yards · no map signal" : cardYd ? "Card yards · aim at green" : "Aim at the green";
+  }
   if (sel) {
     const c = greenCenter(sel.green);
     yd.textContent = Math.round(geoDist(ballPos, { lat: c[0], lon: c[1] }) * YD) + " yd";
     let mn = Infinity, mx = 0;
     sel.green.ring.forEach(q => { const d = geoDist(ballPos, { lat: q[0], lon: q[1] }) * YD; mn = Math.min(mn, d); mx = Math.max(mx, d); });
     fb.textContent = `Front ${Math.round(mn)} · Back ${Math.round(mx)}`;
-  } else { yd.textContent = ""; fb.textContent = ""; }
+  }
   // draw: you at the bottom, the way the phone points is up
   const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
   if (!W) return;
@@ -848,7 +927,10 @@ function miniTick() {
   x.fillStyle = "#2D7DFF"; x.strokeStyle = "#fff"; x.lineWidth = 2;
   x.beginPath(); x.moveTo(ox, oy - 9); x.lineTo(ox + 7, oy + 6); x.lineTo(ox - 7, oy + 6); x.closePath(); x.fill(); x.stroke();
 }
-$("mini").addEventListener("click", e => { e.stopPropagation(); $("mini").classList.toggle("collapsed"); });
+$("mini").addEventListener("click", e => { e.stopPropagation(); if (e.target.tagName !== "BUTTON") $("mini").classList.toggle("collapsed"); });
+const stepHole = d => { cfg.curHole = ((cfg.curHole || 1) - 1 + d + 18) % 18 + 1; saveCfg(); S.miniT = 0; };
+$("bHoleP").onclick = () => stepHole(-1);
+$("bHoleN").onclick = () => stepHole(1);
 
 let MAP = null, mapLayer = null, meMarker = null, mapTimer = null;
 function drawMap() {
@@ -931,14 +1013,20 @@ $("bFound").onclick = () => {
   const miss = S.pos ? Math.round(geoDist(S.shot.target, S.pos) * YD) : null;
   S.found = act;
   $("foundTxt").textContent = act != null ? `That ${S.shot.club} went about ${act} yards.` : "Found it!";
-  $("foundTxt2").textContent = miss != null ? `The estimate was ${miss} yards off. Tap "Update club distance" so the next guess is closer. Only do this for a normal swing.` : "";
+  $("foundTxt2").textContent = miss != null ? `The estimate was ${miss} yards off. If that was a normal swing, tap "Learn from this shot" so the next guess is closer. Skip it for mishits.` : "";
   $("bLearn").style.display = act != null ? "block" : "none";
   say("Found it. Nice.");
   show("found");
 };
 $("bLearn").onclick = () => {
   const c = cfg.clubs.find(c => c[0] === S.shot.club);
-  if (c && S.found) { c[1] = Math.round(c[1] * 0.7 + S.found * 0.3); saveCfg(); $("foundTxt2").textContent = `${c[0]} now set to ${c[1]} yards.`; $("bLearn").style.display = "none"; }
+  if (c && S.found) {
+    const n = c[3] || 0; c[2] = n ? (c[2] * n + S.found) / (n + 1) : S.found; c[3] = n + 1;
+    const ok = saveCfg();
+    $("foundTxt2").textContent = ok ? `${c[0]}: your number ${c[1]} yd, real shots average ${Math.round(c[2])} yd (${c[3]} shot${c[3] > 1 ? "s" : ""}). The app now uses ${clubCarry(c[0])} yd.`
+      : "Couldn't save. Storage is blocked in this browser.";
+    $("bLearn").style.display = "none";
+  }
 };
 $("bNext").onclick = () => { S.shot = null; try { localStorage.removeItem("bs_shot"); } catch (e) {} openFilm(); };
 
@@ -967,8 +1055,10 @@ $("bResume").onclick = async () => { try { await withTimeout(startSensors(), 500
 /* ---------- settings ---------- */
 function renderClubs() {
   $("clubList").innerHTML = cfg.clubs.map((c, i) =>
-    `<div class="clubrow"><input type="text" value="${c[0].replace(/"/g, "&quot;")}" data-i="${i}" data-k="0">
-     <input type="number" inputmode="numeric" pattern="[0-9]*" value="${c[1]}" data-i="${i}" data-k="1"><button data-del="${i}">✕</button></div>`).join("");
+    `<div class="clubrow"><input type="text" value="${esc(c[0])}" data-i="${i}" data-k="0">
+     <input type="number" inputmode="numeric" pattern="[0-9]*" value="${c[1]}" data-i="${i}" data-k="1"><button data-del="${i}">✕</button></div>
+     <div class="learned">${c[3] ? `Learned ${Math.round(c[2])} yd from ${c[3]} shot${c[3] > 1 ? "s" : ""} · app uses ${clubCarry(c[0])} yd<button data-reset="${i}">Reset</button>` : "No shots learned yet · app uses your number"}</div>`).join("");
+  $("clubList").querySelectorAll("[data-reset]").forEach(b => b.onclick = () => { const c = cfg.clubs[+b.dataset.reset]; c[2] = null; c[3] = 0; flash("setStatus", saveCfg()); renderClubs(); });
   $("clubList").querySelectorAll("input").forEach(inp => {
     const upd = () => { const i = +inp.dataset.i, k = +inp.dataset.k;
       if (k) { const n = Math.round(Number(inp.value)); if (n > 0) cfg.clubs[i][1] = n; } else cfg.clubs[i][0] = inp.value; };
@@ -995,6 +1085,111 @@ $("bSaveSettings").onclick = () => {
   const ok = saveCfg(); flash("setStatus", ok);
   if (ok) setTimeout(() => show("home"), 700);
 };
+/* ---------- course picker ---------- */
+function renderCourses() {
+  const cc = curCourse();
+  $("courseCur").textContent = cc ? cc.name : "No course selected";
+  $("courseSaved").innerHTML = cfg.courses.map((c, i) =>
+    `<div class="row"><button class="btn ${c.id === cfg.courseId ? "" : "alt"} small" data-ci="${i}" style="flex:5">${c.id === cfg.courseId ? "✓ " : ""}${esc(c.name)}</button>
+     <button class="btn alt small" data-cdel="${i}" style="flex:1">✕</button></div>`).join("");
+  $("courseSaved").querySelectorAll("[data-ci]").forEach(b => b.onclick = () => {
+    cfg.courseId = cfg.courses[+b.dataset.ci].id; cfg.curHole = 1; saveCfg(); renderCourses(); });
+  $("courseSaved").querySelectorAll("[data-cdel]").forEach(b => b.onclick = () => {
+    const c = cfg.courses[+b.dataset.cdel];
+    if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Sure?"; return; }
+    cfg.courses.splice(+b.dataset.cdel, 1); if (cfg.courseId === c.id) cfg.courseId = cfg.courses[0] ? cfg.courses[0].id : null;
+    saveCfg(); renderCourses(); });
+}
+function showResults(list) {
+  $("courseResults").innerHTML = list.map((r, i) =>
+    `<button class="btn alt small" data-ri="${i}" style="text-align:left">${esc(r.name)}${r.yd != null ? `<br><span class="muted">${r.yd < 1760 ? r.yd + " yd" : (r.yd / 1760).toFixed(1) + " mi"} away</span>` : r.sub ? `<br><span class="muted">${esc(r.sub)}</span>` : ""}</button>`).join("");
+  $("courseResults").querySelectorAll("[data-ri]").forEach(b => b.onclick = () => {
+    const r = list[+b.dataset.ri];
+    let c = cfg.courses.find(c => c.name === r.name && Math.abs(c.lat - r.lat) < 0.01);
+    if (!c) { c = { id: "c" + Date.now(), name: r.name, lat: r.lat, lon: r.lon, card: null }; cfg.courses.push(c); }
+    cfg.courseId = c.id; cfg.curHole = 1; saveCfg();
+    $("courseResults").innerHTML = ""; $("courseMsg").textContent = "Selected. Open Scorecard to fill in par and yards if they're blank.";
+    renderCourses(); });
+}
+function getHere() {
+  return new Promise((res, rej) => {
+    if (S.pos) return res(S.pos);
+    if (!navigator.geolocation) return rej(new Error("no GPS"));
+    navigator.geolocation.getCurrentPosition(p => res({ lat: p.coords.latitude, lon: p.coords.longitude }), rej, { enableHighAccuracy: true, timeout: 20000 });
+  });
+}
+$("bNear").onclick = async () => {
+  $("courseMsg").textContent = "Finding your location…"; $("courseResults").innerHTML = "";
+  try {
+    const p = await getHere();
+    $("courseMsg").textContent = "Searching nearby courses…";
+    const q = `[out:json][timeout:25];nwr["leisure"="golf_course"](around:40000,${p.lat},${p.lon});out center tags 60;`;
+    const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+    const j = await r.json();
+    const list = (j.elements || []).map(e => {
+      const c = e.center || { lat: e.lat, lon: e.lon }; if (!c.lat) return null;
+      return { name: (e.tags && e.tags.name) || "Unnamed golf course", lat: c.lat, lon: c.lon, yd: Math.round(geoDist(p, c) * YD) };
+    }).filter(Boolean).sort((a, b) => a.yd - b.yd).slice(0, 20);
+    $("courseMsg").textContent = list.length ? "Tap your course:" : "No courses found within 25 miles.";
+    showResults(list);
+  } catch (e) { $("courseMsg").textContent = "Couldn't search: " + (e.message || "no signal or location blocked"); }
+};
+$("bCourseQ").onclick = async () => {
+  const q = $("courseQ").value.trim(); if (!q) return;
+  $("courseMsg").textContent = "Searching…"; $("courseResults").innerHTML = "";
+  try {
+    const url = "https://nominatim.openstreetmap.org/search?format=jsonv2&limit=10&q=" + encodeURIComponent(/golf/i.test(q) ? q : q + " golf");
+    const j = await (await fetch(url)).json();
+    const list = j.map(r => ({ name: r.name || r.display_name.split(",")[0], sub: r.display_name.split(",").slice(1, 4).join(","), lat: +r.lat, lon: +r.lon }));
+    $("courseMsg").textContent = list.length ? "Tap your course:" : "Nothing found. Try the town name, or 'Courses near me'.";
+    showResults(list);
+  } catch (e) { $("courseMsg").textContent = "Couldn't search (no signal?)."; }
+};
+$("bCourse").onclick = () => { renderCourses(); $("courseResults").innerHTML = ""; $("courseMsg").textContent = ""; show("courses"); };
+
+/* ---------- scorecard ---------- */
+let cardEdit = false;
+function renderCard() {
+  const c = curCourse();
+  if (!c) { $("cardTitle").textContent = "Pick a course first"; $("cardTbl").innerHTML = ""; $("cardTot").textContent = ""; $("teeSel").innerHTML = ""; return; }
+  const card = cardOf(c), tee = teeName(card), yds = card.yards[tee];
+  const sc = cfg.scores[c.id] || (cfg.scores[c.id] = Array(18).fill(null));
+  $("cardTitle").textContent = c.name;
+  $("teeSel").innerHTML = card.tees.map(t => `<option${t === tee ? " selected" : ""}>${esc(t)}</option>`).join("");
+  $("bCardEdit").textContent = cardEdit ? "Done editing" : "Edit card";
+  const cell = (v, k, i) => cardEdit ? `<input type="number" inputmode="numeric" value="${v || ""}" data-k="${k}" data-i="${i}">` : (v || "–");
+  const row = i => `<tr class="${i + 1 === cfg.curHole ? "cur" : ""}"><td class="hn" data-h="${i + 1}">${i + 1}</td><td>${cell(card.par[i], "par", i)}</td>
+    <td>${cell(yds[i], "yd", i)}</td><td>${cell(card.hcp[i], "hcp", i)}</td>
+    <td><input type="number" inputmode="numeric" value="${sc[i] || ""}" data-k="sc" data-i="${i}"></td></tr>`;
+  const sum = (a, f, t) => a.slice(f, t).reduce((s, v) => s + (Number(v) || 0), 0);
+  const sumRow = (lbl, f, t) => `<tr class="sum"><td>${lbl}</td><td>${sum(card.par, f, t)}</td><td>${sum(yds, f, t)}</td><td></td><td>${sum(sc, f, t) || ""}</td></tr>`;
+  let h = "<tr><th>Hole</th><th>Par</th><th>Yds</th><th>Hcp</th><th>Score</th></tr>";
+  for (let i = 0; i < 9; i++) h += row(i);
+  h += sumRow("Out", 0, 9);
+  for (let i = 9; i < 18; i++) h += row(i);
+  h += sumRow("In", 9, 18) + sumRow("Tot", 0, 18);
+  $("cardTbl").innerHTML = h;
+  let played = 0, strokes = 0, parPlayed = 0;
+  sc.forEach((s, i) => { if (s) { played++; strokes += s; parPlayed += card.par[i] || 0; } });
+  const vs = strokes - parPlayed;
+  $("cardTot").textContent = played ? `${strokes} through ${played} · ${vs === 0 ? "Even" : (vs > 0 ? "+" : "") + vs}` : "Tap a hole number to make it the current hole";
+  $("cardTbl").querySelectorAll("[data-h]").forEach(td => td.onclick = () => { cfg.curHole = +td.dataset.h; saveCfg(); renderCard(); });
+  $("cardTbl").querySelectorAll("input").forEach(inp => inp.onchange = () => {
+    const i = +inp.dataset.i, v = Math.round(Number(inp.value)) || null, k = inp.dataset.k;
+    if (k === "sc") sc[i] = v; else if (k === "par") card.par[i] = v; else if (k === "hcp") card.hcp[i] = v; else card.yards[tee][i] = v;
+    saveCfg(); renderCard();
+  });
+}
+$("teeSel").onchange = e => { cfg.tee = e.target.value; saveCfg(); renderCard(); };
+$("bCardEdit").onclick = () => { cardEdit = !cardEdit; renderCard(); };
+$("bNewRound").onclick = () => {
+  const b = $("bNewRound"), c = curCourse(); if (!c) return;
+  if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Clear scores?"; setTimeout(() => { b.dataset.sure = ""; b.textContent = "New round"; }, 3000); return; }
+  cfg.scores[c.id] = Array(18).fill(null); cfg.curHole = 1; saveCfg(); b.dataset.sure = ""; b.textContent = "New round"; renderCard();
+};
+$("bCard").onclick = () => { cardEdit = false; renderCard(); show("card"); };
+
 show("home");
 </script>
 </body>
