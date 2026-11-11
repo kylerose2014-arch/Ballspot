@@ -13,6 +13,13 @@
   #map{flex:1;width:100%;border-radius:14px;margin:8px 0;background:#111}
   #mapInfo{font-size:20px;font-weight:700;min-height:28px}
   #fLie{font-size:22px;font-weight:800;margin:4px 0;min-height:28px}
+  #mini{position:absolute;right:8px;top:calc(env(safe-area-inset-top) + 60px);width:136px;background:#000c;
+    border:2px solid #FFD60A;border-radius:12px;padding:4px;text-align:center;z-index:2}
+  #miniC{width:126px;height:150px;display:block;border-radius:8px}
+  #miniHole{font-size:16px;font-weight:800;margin-top:2px}
+  #miniYd{font-size:32px;font-weight:900;color:#FFD60A;line-height:1.05}
+  #miniFB{font-size:14px;color:#ddd}
+  #mini.collapsed #miniC,#mini.collapsed #miniFB{display:none}
   :root{--y:#FFD60A;--bg:#000;--fg:#fff;--dim:#bbb;--ok:#3BE37A;--bad:#FF5A4E;}
   *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
   html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
@@ -116,6 +123,7 @@
     <label><input type="checkbox" id="sVoice"> Spoken directions</label>
     <label><input type="checkbox" id="sMic"> Detect the hit by sound</label>
   </div>
+  <div id="setStatus" style="min-height:26px;font-weight:700;margin-top:6px"></div>
   <button class="btn" id="bSaveSettings">Save</button>
 </section>
 
@@ -128,6 +136,12 @@
     <span class="chip" id="cSteady">Steady</span>
     <span class="chip" id="cGps">GPS…</span>
     <span class="chip" id="cHead">Compass…</span>
+  </div>
+  <div id="mini" aria-live="polite">
+    <canvas id="miniC"></canvas>
+    <div id="miniHole">GPS…</div>
+    <div id="miniYd"></div>
+    <div id="miniFB"></div>
   </div>
   <div id="panel">
     <div id="msg"></div>
@@ -198,7 +212,11 @@ const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(r, m
     w.textContent = "This page isn't on a secure (https) web address, so the phone will block the camera, GPS and compass. Put it on GitHub Pages and open that link.";
   else if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
     w.textContent = "This browser view can't use the camera. Open the link in Safari (iPhone) or Chrome (Android).";
-  else w.style.display = "none";
+  else {
+    let ok = false; try { localStorage.setItem("bs_t", "1"); ok = localStorage.getItem("bs_t") === "1"; } catch (e) {}
+    if (ok) w.style.display = "none";
+    else w.textContent = "This browser view can't save settings (private browsing?). Club yards will reset when you close it.";
+  }
 })();
 /* ---------- helpers ---------- */
 const $ = id => document.getElementById(id);
@@ -219,7 +237,19 @@ function loadCfg() {
   try { const s = JSON.parse(localStorage.getItem("bs_cfg")); if (s) return Object.assign(JSON.parse(JSON.stringify(DEF)), s); } catch (e) {}
   return JSON.parse(JSON.stringify(DEF));
 }
-function saveCfg() { try { localStorage.setItem("bs_cfg", JSON.stringify(cfg)); } catch (e) {} }
+function saveCfg() {
+  try {
+    localStorage.setItem("bs_cfg", JSON.stringify(cfg));
+    if (localStorage.getItem("bs_cfg") !== JSON.stringify(cfg)) throw new Error("not kept");
+    return true;
+  } catch (e) { return false; }
+}
+function flash(id, ok) {
+  const el = document.getElementById(id); if (!el) return;
+  el.textContent = ok ? "Saved ✓" : "Couldn't save. This browser is blocking storage (private browsing, or opened from a preview). Use Safari/Chrome normally, not private mode.";
+  el.style.color = ok ? "var(--ok)" : "var(--bad)";
+  clearTimeout(el._t); if (ok) el._t = setTimeout(() => el.textContent = "", 2500);
+}
 function saveShot() { try { localStorage.setItem("bs_shot", JSON.stringify(S.shot)); } catch (e) {} }
 function loadShot() { try { return JSON.parse(localStorage.getItem("bs_shot")); } catch (e) { return null; } }
 let cfg = loadCfg();
@@ -471,6 +501,8 @@ function frame() {
   }
   drawOverlay();
   updateChips();
+  const now = performance.now();
+  if (!S.miniT || now - S.miniT > 500) { S.miniT = now; try { miniTick(); } catch (e) {} }
 }
 
 /* ---------- shot flow ---------- */
@@ -552,7 +584,14 @@ function setMode(m) {
     body.innerHTML = `${clubSel()}
       <div class="distbox"><button class="btn alt" id="bMinus">−10</button><div class="val" id="dVal"></div><button class="btn alt" id="bPlus">+10</button></div>
       <div class="row"><button class="btn alt small" id="bShort">Short</button><button class="btn alt small" id="bNorm">Normal</button><button class="btn alt small" id="bLong">Long</button></div>
+      <button class="btn alt small" id="bSaveCarry">Save as my usual carry</button>
+      <div id="carryStatus" style="min-height:22px;font-weight:700"></div>
       <button class="btn go" id="bFind">FIND MY BALL</button>`;
+    $("bSaveCarry").onclick = () => {
+      let c = cfg.clubs.find(c => c[0] === cfg.club);
+      if (!c) { c = [cfg.club, S.dist]; cfg.clubs.push(c); }
+      c[1] = S.dist; flash("carryStatus", saveCfg());
+    };
     const upd = () => $("dVal").textContent = S.dist + " yd";
     const base = () => clubCarry(cfg.club);
     S.dist = base(); upd();
@@ -643,7 +682,7 @@ function startFinder(quiet) {
 }
 
 /* ---------- course map (OpenStreetMap golf features) ---------- */
-const COURSE = { key: null, feats: [], status: "" };
+const COURSE = { center: null, feats: [], status: "", lastTry: 0 };
 const FEAT_STYLE = {
   green: { color: "#3BE37A", weight: 3, fillOpacity: 0.35, label: "the green" },
   fairway: { color: "#B7F28B", weight: 2, fillOpacity: 0.18, label: "the fairway" },
@@ -664,11 +703,14 @@ function featKind(t) {
   if (g === "hole") return "hole";
   return null;
 }
-async function loadCourse() {
-  if (!S.shot) return;
-  const t = S.shot.target, key = t.lat.toFixed(3) + "," + t.lon.toFixed(3);
-  if (COURSE.key === key && COURSE.feats.length) return;
-  COURSE.key = key; COURSE.feats = []; COURSE.status = "loading";
+async function loadCourse(center) {
+  const t = center || (S.shot && S.shot.target); if (!t) return;
+  if (COURSE.status === "loading") return;
+  if (COURSE.center && geoDist(COURSE.center, t) < 400) {           // already have this area
+    if (COURSE.status !== "error" || Date.now() - COURSE.lastTry < 30000) return;
+  }
+  COURSE.center = { lat: t.lat, lon: t.lon }; COURSE.lastTry = Date.now();
+  COURSE.feats = []; COURSE.status = "loading";
   const d = 0.009; // ~1 km box around the ball
   const bb = `${t.lat - d},${t.lon - d * 1.4},${t.lat + d},${t.lon + d * 1.4}`;
   const q = `[out:json][timeout:25];(way["golf"](${bb});relation["golf"](${bb});way["natural"~"water|sand"](${bb});relation["natural"="water"](${bb}););out geom;`;
@@ -724,6 +766,90 @@ function showLie(speakIt) {
   else if (COURSE.status === "error") t = "Course map unavailable (no signal?)";
   $("fLie").textContent = t;
 }
+/* ---------- live mini hole map on the filming screen ---------- */
+function toLocal(o, lat, lon) { return [(lon - o.lon) * Math.cos(rad(o.lat)) * 111320, (lat - o.lat) * 110540]; }
+function greenCenter(f) { return f.c || (f.c = f.ring.reduce((a, q) => [a[0] + q[0] / f.ring.length, a[1] + q[1] / f.ring.length], [0, 0])); }
+function distToLine(p, ring) {
+  let best = Infinity;
+  for (let i = 1; i < ring.length; i++) {
+    const a = toLocal(p, ring[i - 1][0], ring[i - 1][1]), b = toLocal(p, ring[i][0], ring[i][1]);
+    const dx = b[0] - a[0], dy = b[1] - a[1], L2 = dx * dx + dy * dy || 1;
+    const t = clamp(-(a[0] * dx + a[1] * dy) / L2, 0, 1);
+    best = Math.min(best, Math.hypot(a[0] + t * dx, a[1] + t * dy));
+  }
+  return best;
+}
+function pickHole(p, h) {
+  const greens = COURSE.feats.filter(f => f.kind === "green" && f.ring.length > 2);
+  if (!greens.length) return null;
+  const nearestGreenTo = q => { let g = null, d = Infinity;
+    for (const f of greens) { const c = greenCenter(f), dd = geoDist(q, { lat: c[0], lon: c[1] }); if (dd < d) { d = dd; g = f; } } return g; };
+  // 1) mapped hole lines (tee → green) give the hole number and par
+  let hole = null, hd = Infinity;
+  for (const f of COURSE.feats) if (f.kind === "hole" && f.ring.length > 1) { const d = distToLine(p, f.ring); if (d < hd) { hd = d; hole = f; } }
+  if (hole && hd < 70) { const end = hole.ring[hole.ring.length - 1]; return { green: nearestGreenTo({ lat: end[0], lon: end[1] }), hole }; }
+  // 2) otherwise: the green in the direction the phone is pointed
+  if (h == null) return null;
+  let bg = null, bs = Infinity;
+  for (const f of greens) {
+    const c = greenCenter(f), q = { lat: c[0], lon: c[1] }, d = geoDist(p, q);
+    if (d > 600 || d < 5) continue;
+    const a = Math.abs(norm180(geoBearing(p, q) - h)); if (a > 45) continue;
+    const s = a + d / 30; if (s < bs) { bs = s; bg = f; }
+  }
+  return bg ? { green: bg, hole: null } : null;
+}
+function miniTick() {
+  const hole = $("miniHole"), yd = $("miniYd"), fb = $("miniFB"), cv = $("miniC");
+  if (!S.pos) { hole.textContent = "GPS…"; yd.textContent = ""; fb.textContent = ""; return; }
+  loadCourse(S.pos);
+  const h = trueHeading();
+  if (!S.armed && !S.tracking) S.sel = COURSE.status === "ok" ? pickHole(S.pos, h) : null;   // freeze during the shot
+  const sel = S.sel;
+  // the ball is ~4 m in front of the person filming
+  const ballPos = h != null ? geoDest(S.pos, h, 4) : S.pos;
+  if (COURSE.status === "loading") hole.textContent = "Loading course…";
+  else if (COURSE.status === "empty") hole.textContent = "Course not mapped";
+  else if (COURSE.status === "error") hole.textContent = "No map (signal?)";
+  else if (!sel) hole.textContent = "Point at the green";
+  else hole.textContent = sel.hole && sel.hole.ref ? `Hole ${sel.hole.ref}${sel.hole.par ? " · Par " + sel.hole.par : ""}` : "To green";
+  if (sel) {
+    const c = greenCenter(sel.green);
+    yd.textContent = Math.round(geoDist(ballPos, { lat: c[0], lon: c[1] }) * YD) + " yd";
+    let mn = Infinity, mx = 0;
+    sel.green.ring.forEach(q => { const d = geoDist(ballPos, { lat: q[0], lon: q[1] }) * YD; mn = Math.min(mn, d); mx = Math.max(mx, d); });
+    fb.textContent = `Front ${Math.round(mn)} · Back ${Math.round(mx)}`;
+  } else { yd.textContent = ""; fb.textContent = ""; }
+  // draw: you at the bottom, the way the phone points is up
+  const dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  if (!W) return;
+  if (cv.width !== W * dpr) { cv.width = W * dpr; cv.height = H * dpr; }
+  const x = cv.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0);
+  x.fillStyle = "#16301c"; x.fillRect(0, 0, W, H);
+  const hd = rad(h == null ? 0 : h), sinH = Math.sin(hd), cosH = Math.cos(hd);
+  const range = sel ? geoDist(S.pos, { lat: greenCenter(sel.green)[0], lon: greenCenter(sel.green)[1] }) + 40 : 300;
+  const mpp = Math.max(0.4, range / (H - 22)), ox = W / 2, oy = H - 12;
+  const P = (lat, lon) => { const [e, n] = toLocal(S.pos, lat, lon);
+    return [ox + (e * cosH - n * sinH) / mpp, oy - (e * sinH + n * cosH) / mpp]; };
+  const order = ["rough", "fairway", "tee", "water", "bunker", "green", "hole"];
+  for (const k of order) for (const f of COURSE.feats) {
+    if (f.kind !== k) continue;
+    const st = FEAT_STYLE[k]; x.beginPath();
+    f.ring.forEach((q, i) => { const s = P(q[0], q[1]); i ? x.lineTo(s[0], s[1]) : x.moveTo(s[0], s[1]); });
+    if (k === "hole") { x.setLineDash([4, 4]); x.strokeStyle = "#FFD60A88"; x.lineWidth = 1.5; x.stroke(); x.setLineDash([]); continue; }
+    x.closePath(); x.globalAlpha = k === "rough" ? 0.25 : 0.85; x.fillStyle = st.color; x.fill(); x.globalAlpha = 1;
+  }
+  if (sel) {
+    x.beginPath(); sel.green.ring.forEach((q, i) => { const s = P(q[0], q[1]); i ? x.lineTo(s[0], s[1]) : x.moveTo(s[0], s[1]); });
+    x.closePath(); x.strokeStyle = "#FFD60A"; x.lineWidth = 3; x.stroke();
+    const c = greenCenter(sel.green), s = P(c[0], c[1]);
+    x.setLineDash([5, 5]); x.strokeStyle = "#FFD60A"; x.lineWidth = 2; x.beginPath(); x.moveTo(ox, oy); x.lineTo(s[0], s[1]); x.stroke(); x.setLineDash([]);
+  }
+  x.fillStyle = "#2D7DFF"; x.strokeStyle = "#fff"; x.lineWidth = 2;
+  x.beginPath(); x.moveTo(ox, oy - 9); x.lineTo(ox + 7, oy + 6); x.lineTo(ox - 7, oy + 6); x.closePath(); x.fill(); x.stroke();
+}
+$("mini").addEventListener("click", e => { e.stopPropagation(); $("mini").classList.toggle("collapsed"); });
+
 let MAP = null, mapLayer = null, meMarker = null, mapTimer = null;
 function drawMap() {
   if (typeof L === "undefined") { $("mapInfo").textContent = "Map needs an internet connection."; return; }
@@ -842,10 +968,15 @@ $("bResume").onclick = async () => { try { await withTimeout(startSensors(), 500
 function renderClubs() {
   $("clubList").innerHTML = cfg.clubs.map((c, i) =>
     `<div class="clubrow"><input type="text" value="${c[0].replace(/"/g, "&quot;")}" data-i="${i}" data-k="0">
-     <input type="number" value="${c[1]}" data-i="${i}" data-k="1"><button data-del="${i}">✕</button></div>`).join("");
-  $("clubList").querySelectorAll("input").forEach(inp => inp.oninput = () => {
-    const i = +inp.dataset.i, k = +inp.dataset.k; cfg.clubs[i][k] = k ? Number(inp.value) || 0 : inp.value; });
-  $("clubList").querySelectorAll("[data-del]").forEach(b => b.onclick = () => { cfg.clubs.splice(+b.dataset.del, 1); renderClubs(); });
+     <input type="number" inputmode="numeric" pattern="[0-9]*" value="${c[1]}" data-i="${i}" data-k="1"><button data-del="${i}">✕</button></div>`).join("");
+  $("clubList").querySelectorAll("input").forEach(inp => {
+    const upd = () => { const i = +inp.dataset.i, k = +inp.dataset.k;
+      if (k) { const n = Math.round(Number(inp.value)); if (n > 0) cfg.clubs[i][1] = n; } else cfg.clubs[i][0] = inp.value; };
+    inp.addEventListener("input", upd);
+    inp.addEventListener("change", () => { upd(); flash("setStatus", saveCfg()); });   // saves as soon as you leave the box
+    inp.addEventListener("blur", () => { upd(); saveCfg(); });
+  });
+  $("clubList").querySelectorAll("[data-del]").forEach(b => b.onclick = () => { cfg.clubs.splice(+b.dataset.del, 1); flash("setStatus", saveCfg()); renderClubs(); });
 }
 $("bSettings").onclick = () => {
   renderClubs(); $("sHand").value = cfg.hand; $("sDecl").value = cfg.decl;
@@ -854,11 +985,15 @@ $("bSettings").onclick = () => {
 };
 $("bAddClub").onclick = () => { cfg.clubs.push(["New club", 100]); renderClubs(); };
 $("bSaveSettings").onclick = () => {
-  cfg.clubs = cfg.clubs.filter(c => String(c[0]).trim());
   cfg.hand = $("sHand").value; cfg.decl = Number($("sDecl").value) || 0;
   cfg.sound = $("sSound").checked; cfg.voice = $("sVoice").checked; cfg.mic = $("sMic").checked;
+  if (document.activeElement) document.activeElement.blur();
+  $("clubList").querySelectorAll('input[data-k="1"]').forEach(inp => { const n = Math.round(Number(inp.value)); if (n > 0) cfg.clubs[+inp.dataset.i][1] = n; });
+  $("clubList").querySelectorAll('input[data-k="0"]').forEach(inp => { cfg.clubs[+inp.dataset.i][0] = inp.value; });
+  cfg.clubs = cfg.clubs.filter(c => String(c[0]).trim());
   if (!cfg.clubs.find(c => c[0] === cfg.club) && cfg.clubs.length) cfg.club = cfg.clubs[0][0];
-  saveCfg(); show("home");
+  const ok = saveCfg(); flash("setStatus", ok);
+  if (ok) setTimeout(() => show("home"), 700);
 };
 show("home");
 </script>
