@@ -64,7 +64,7 @@
   #overlay{position:absolute;inset:0;width:100%;height:100%}
   #topbar{position:absolute;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;
     display:flex;gap:8px;flex-wrap:wrap;background:linear-gradient(#000c,#0000)}
-  .chip{background:#000b;border:2px solid #666;border-radius:999px;padding:6px 12px;font-size:18px;font-weight:700}
+  .chip{background:#000c;border:2px solid #666;border-radius:999px;padding:5px 12px;font-size:19px;font-weight:800}
   .chip.ok{border-color:var(--ok);color:var(--ok)}
   .chip.bad{border-color:var(--bad);color:var(--bad)}
   #panel{position:absolute;left:0;right:0;bottom:0;padding:12px 12px calc(env(safe-area-inset-bottom) + 12px);
@@ -528,7 +528,9 @@ function ballDistM() {
   if (dep < 4) return null;
   return 1.35 / Math.tan(rad(dep));
 }
-function defaultBall() { const m = coverMap(); const p = s2v(m, overlay.clientWidth * 0.5, overlay.clientHeight * 0.82); return { x: p[0], y: p[1] }; }
+function ballScreenY() { const pt = $("panel").getBoundingClientRect().top - overlay.getBoundingClientRect().top;
+  return Math.min(overlay.clientHeight * 0.82, (pt > 0 ? pt : overlay.clientHeight) - 45); }
+function defaultBall() { const m = coverMap(); const p = s2v(m, overlay.clientWidth * 0.5, ballScreenY()); return { x: p[0], y: p[1] }; }
 
 /* luminance of an RGBA buffer */
 function lum(d, n) { const L = new Uint8Array(n); for (let i = 0, j = 0; i < n; i++, j += 4) L[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8; return L; }
@@ -689,7 +691,7 @@ function setMode(m) {
     $("bReady").onclick = () => { if (S.rangeTarget == null) S.rangeTarget = trueHeading();
       if (!S.ballV) S.ballV = defaultBall(); S.armed = true; S.armedAt = performance.now(); hasPrevFull = false; setMode("armed"); };
   } else if (m === "setup") {
-    msg.innerHTML = "Stand 3–5 steps straight behind the ball, out of the swing. Hold the phone level at chest height with the ball in the circle (tap the ball if it isn't). The golfer doesn't need to be in view.";
+    msg.innerHTML = "3–5 steps behind the ball, phone at chest height. Ball in the circle (tap the ball to move it).";
     body.innerHTML = `${clubSel()}<div class="row"><button class="btn alt small" id="bBack">Back</button><button class="btn" id="bReady">READY</button></div>`;
     $("bBack").onclick = () => show("home");
     $("bReady").onclick = () => { if (!S.ballV) S.ballV = defaultBall(); S.armed = true; S.armedAt = performance.now(); hasPrevFull = false; setMode("armed"); };
@@ -786,7 +788,7 @@ function drawOverlay() {
   octx.lineCap = "round";
   if (S.mode === "setup" || S.mode === "armed") {
     // ball circle + a quick distance check from the phone's tilt (no need to fit the whole golfer)
-    const b = S.ballV ? v2s(m, S.ballV.x, S.ballV.y) : [W * 0.5, H * 0.82];
+    const b = S.ballV ? v2s(m, S.ballV.x, S.ballV.y) : [W * 0.5, ballScreenY()];
     const dm = ballDistM(), ok = dm != null && dm >= 1.8 && dm <= 5;
     octx.strokeStyle = dm == null ? "#FFD60A" : ok ? "#3BE37A" : "#FF5A4E"; octx.fillStyle = octx.strokeStyle;
     octx.lineWidth = 5; octx.beginPath(); octx.arc(b[0], b[1], 24, 0, Math.PI * 2); octx.stroke();
@@ -834,9 +836,17 @@ function updateChips() {
   else if (dm < 1.8) chip("cDist", "Too close: step back", "bad");
   else if (dm > 5) chip("cDist", `${steps} steps: move closer`, "bad");
   else chip("cDist", `${steps} steps ✓`, "ok");
-  $("cDist").style.display = (S.mode === "setup" || S.mode === "armed") ? "" : "none";
-  const h = trueHeading();
+    const h = trueHeading();
   chip("cHead", h == null ? "Compass…" : "Facing " + DIRS[Math.round(h / 45) % 8], h == null ? "bad" : "ok");
+  // show only what needs fixing (max 2), or a single "Ready ✓"
+  const lining = S.mode === "setup" || S.mode === "armed";
+  let shown = 0;
+  ["cDist", "cLevel", "cSteady", "cGps", "cHead"].forEach(id => { const c = $(id);
+    const bad = c.classList.contains("bad") && (id !== "cDist" || lining);
+    c.style.display = bad && shown < 2 ? "" : "none"; if (bad && shown < 2) shown++; });
+  if (!shown) { chip("cLevel", "Ready ✓", "ok"); $("cLevel").style.display = ""; }
+  // keep the hole box just under the status row
+  const tb = $("topbar").getBoundingClientRect(); $("mini").style.top = Math.round(tb.bottom + 4) + "px";
 }
 overlay.addEventListener("click", e => {
   if (S.mode !== "setup" || !VW) return;
@@ -913,7 +923,8 @@ async function fetchFeats(t, d, onTry) {
     const rings = [];
     if (el.type === "way" && el.geometry) rings.push(el.geometry.map(p => [r6(p.lat), r6(p.lon)]));
     if (el.type === "relation" && el.members) el.members.forEach(m => { if (m.role !== "inner" && m.geometry) rings.push(m.geometry.map(p => [r6(p.lat), r6(p.lon)])); });
-    rings.forEach(ring => out.push({ kind, ring, ref: (el.tags || {}).ref, par: (el.tags || {}).par }));
+    const tg = el.tags || {};
+    rings.forEach(ring => out.push({ kind, ring, ref: tg.ref, par: tg.par, name: tg.name, cn: tg["golf:course:name"] || tg["golf:course"] }));
   }
   return out;
 }
@@ -987,6 +998,19 @@ function showLie(speakIt) {
   $("fLie").textContent = t;
 }
 /* ---------- live mini hole map on the filming screen ---------- */
+function holeNum(f) {
+  const m = String(f.ref || "").match(/\d+/) || String(f.name || "").match(/\d+/);
+  return m ? +m[0] : null;
+}
+// the hole line for hole n of course cc (when a club has two courses, prefer the one whose name matches)
+function findHole(feats, n, cc) {
+  const c = feats.filter(f => f.kind === "hole" && f.ring.length > 1 && holeNum(f) === n);
+  if (c.length <= 1) return c[0] || null;
+  const words = String(cc.name || "").toLowerCase().split(/[^a-z]+/).filter(w => w.length > 3 && !/golf|club|course|creek/.test(w));
+  const named = c.filter(f => words.some(w => String((f.cn || "") + " " + (f.name || "")).toLowerCase().includes(w)));
+  const pool = named.length ? named : c;
+  return pool.reduce((a, f) => geoDist({ lat: f.ring[0][0], lon: f.ring[0][1] }, cc) < geoDist({ lat: a.ring[0][0], lon: a.ring[0][1] }, cc) ? f : a);
+}
 function toLocal(o, lat, lon) { return [(lon - o.lon) * Math.cos(rad(o.lat)) * 111320, (lat - o.lat) * 110540]; }
 function greenCenter(f) { return f.c || (f.c = f.ring.reduce((a, q) => [a[0] + q[0] / f.ring.length, a[1] + q[1] / f.ring.length], [0, 0])); }
 function distToLine(p, ring) {
@@ -1031,8 +1055,8 @@ function miniTick() {
   // the ball is ~4 m in front of the person filming
   const ballPos = h != null ? geoDest(S.pos, h, 4) : S.pos;
   // hole number: from the course map when it has hole lines, otherwise the ‹ › buttons
-  if (sel && sel.hole && /^\d+$/.test(sel.hole.ref || "") && !S.armed && !S.tracking) {
-    const n = +sel.hole.ref; if (n >= 1 && n <= 18 && n !== cfg.curHole) { cfg.curHole = n; saveCfg(); }
+  if (sel && sel.hole && holeNum(sel.hole) && !S.armed && !S.tracking) {
+    const n = holeNum(sel.hole); if (n >= 1 && n <= 18 && n !== cfg.curHole) { cfg.curHole = n; saveCfg(); }
   }
   const card = cardOf(curCourse()), hi = (cfg.curHole || 1) - 1;
   const par = card ? card.par[hi] : null, cardYd = card ? card.yards[teeName(card)][hi] : 0;
@@ -1096,7 +1120,7 @@ function miniPreview(cc) {
   x.fillStyle = "#16301c"; x.fillRect(0, 0, W, H);
   const feats = cc.feats;
   if (!feats.length) { $("miniFB").textContent = "Card yards · course not mapped"; return; }
-  const holeF = feats.find(f => f.kind === "hole" && String(f.ref) === String(n) && f.ring.length > 1);
+  const holeF = findHole(feats, n, cc);
   if (holeF) {   // tee at the bottom, green at the top
     const a = holeF.ring[0], b = holeF.ring[holeF.ring.length - 1], tee = { lat: a[0], lon: a[1] }, end = { lat: b[0], lon: b[1] };
     let green = null, gd = Infinity;
@@ -1105,15 +1129,12 @@ function miniPreview(cc) {
     drawFeats(x, feats, tee, geoBearing(tee, end), mpp, W / 2, H - 12, green, false);
     x.fillStyle = "#fff"; x.beginPath(); x.arc(W / 2, H - 12, 5, 0, Math.PI * 2); x.fill();
     $("miniFB").textContent = "Preview (card yards)";
-  } else {         // no hole lines: whole-course overview, north up
-    let la = [], lo = [];
-    feats.forEach(f => { if (f.kind === "green" || f.kind === "fairway" || f.kind === "tee") f.ring.forEach(q => { la.push(q[0]); lo.push(q[1]); }); });
-    if (!la.length) feats.forEach(f => f.ring.forEach(q => { la.push(q[0]); lo.push(q[1]); }));
-    const mid = { lat: (Math.min(...la) + Math.max(...la)) / 2, lon: (Math.min(...lo) + Math.max(...lo)) / 2 };
-    const spanN = (Math.max(...la) - Math.min(...la)) * 110540, spanE = (Math.max(...lo) - Math.min(...lo)) * 111320 * Math.cos(rad(mid.lat));
-    const mpp = Math.max(spanN / (H - 8), spanE / (W - 8), 0.4);
-    drawFeats(x, feats, mid, 0, mpp, W / 2, H / 2, null, false);
-    $("miniFB").textContent = "Map saved ✓";
+  } else {         // this hole isn't numbered in the map data: say so instead of drawing the whole course tiny
+    const nums = [...new Set(feats.filter(f => f.kind === "hole").map(holeNum).filter(Boolean))];
+    x.fillStyle = "#ddd"; x.font = "bold 14px system-ui"; x.textAlign = "center";
+    const lines = nums.length ? ["Hole " + n + " isn't", "numbered on", "the map yet."] : ["Holes aren't", "numbered on", "the map yet."];
+    lines.forEach((l, i) => x.fillText(l, W / 2, H / 2 - 18 + i * 18)); x.textAlign = "left";
+    $("miniFB").textContent = "Live view works on course";
   }
 }
 $("mini").addEventListener("click", e => { e.stopPropagation(); if (e.target.tagName !== "BUTTON") $("mini").classList.toggle("collapsed"); });
@@ -1345,7 +1366,9 @@ function renderCourses() {
   else if (!cc.feats) { ms.textContent = "Map not saved yet. It will load live on the course, or download it now."; ms.style.color = "var(--dim)"; dl.textContent = "Download course map"; }
   else {
     const g = cc.feats.filter(f => f.kind === "green").length, h = cc.feats.filter(f => f.kind === "hole").length;
-    ms.textContent = cc.feats.length ? `Map saved ✓ ${g} greens, ${h} hole lines, ${cc.feats.length - g - h} other features` : "Map saved, but this course has no outlines on OpenStreetMap yet.";
+    const nums = [...new Set(cc.feats.filter(f => f.kind === "hole").map(holeNum).filter(Boolean))].sort((a, b) => a - b);
+    const names = [...new Set(cc.feats.filter(f => f.kind === "hole" && f.cn).map(f => f.cn))];
+    ms.textContent = cc.feats.length ? `Map saved ✓ ${g} greens, ${h} hole lines${nums.length ? " (numbered: " + nums.join(", ") + ")" : " (not numbered)"}${names.length ? " · courses: " + names.join(", ") : ""}` : "Map saved, but this course has no outlines on OpenStreetMap yet.";
     ms.style.color = cc.feats.length && g ? "var(--ok)" : "var(--bad)"; dl.textContent = "Update course map";
   }
   $("courseSaved").innerHTML = cfg.courses.map((c, i) =>
