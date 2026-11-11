@@ -1,0 +1,866 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover,user-scalable=no">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="mobile-web-app-capable" content="yes">
+<meta name="theme-color" content="#000000">
+<title>Ball Spotter</title>
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.css">
+<script async src="https://cdnjs.cloudflare.com/ajax/libs/leaflet/1.9.4/leaflet.min.js"></script>
+<style>
+  #map{flex:1;width:100%;border-radius:14px;margin:8px 0;background:#111}
+  #mapInfo{font-size:20px;font-weight:700;min-height:28px}
+  #fLie{font-size:22px;font-weight:800;margin:4px 0;min-height:28px}
+  :root{--y:#FFD60A;--bg:#000;--fg:#fff;--dim:#bbb;--ok:#3BE37A;--bad:#FF5A4E;}
+  *{box-sizing:border-box;-webkit-tap-highlight-color:transparent}
+  html,body{margin:0;height:100%;background:var(--bg);color:var(--fg);
+    font-family:-apple-system,system-ui,"Segoe UI",Roboto,sans-serif;font-size:20px;overflow:hidden}
+  .screen{position:fixed;inset:0;display:none;flex-direction:column;
+    padding:calc(env(safe-area-inset-top) + 12px) 14px calc(env(safe-area-inset-bottom) + 12px)}
+  .screen.on{display:flex}
+  h1{font-size:40px;margin:8px 0 4px;color:var(--y)}
+  h2{font-size:28px;margin:6px 0;color:var(--y)}
+  p{line-height:1.35;margin:8px 0}
+  button,select,input{font:inherit}
+  .btn{display:block;width:100%;min-height:68px;margin:8px 0;border:0;border-radius:16px;
+    background:var(--y);color:#000;font-size:26px;font-weight:800;padding:10px}
+  .btn.alt{background:#222;color:var(--fg);border:3px solid #555}
+  .btn.go{background:var(--ok)}
+  .btn.small{min-height:52px;font-size:21px}
+  .row{display:flex;gap:10px}
+  .row>*{flex:1}
+  .scroll{overflow-y:auto;flex:1;-webkit-overflow-scrolling:touch}
+  .muted{color:var(--dim);font-size:18px}
+  .big{font-size:30px;font-weight:800}
+  select,input[type=number]{background:#111;color:var(--fg);border:3px solid #555;border-radius:12px;
+    padding:10px;font-size:24px;width:100%}
+  label{display:block;margin:12px 0 4px;font-weight:700}
+
+  /* film */
+  #film{padding:0}
+  #video{position:absolute;inset:0;width:100%;height:100%;object-fit:cover;background:#000}
+  #overlay{position:absolute;inset:0;width:100%;height:100%}
+  #topbar{position:absolute;left:0;right:0;top:0;padding:calc(env(safe-area-inset-top) + 8px) 10px 8px;
+    display:flex;gap:8px;flex-wrap:wrap;background:linear-gradient(#000c,#0000)}
+  .chip{background:#000b;border:2px solid #666;border-radius:999px;padding:6px 12px;font-size:18px;font-weight:700}
+  .chip.ok{border-color:var(--ok);color:var(--ok)}
+  .chip.bad{border-color:var(--bad);color:var(--bad)}
+  #panel{position:absolute;left:0;right:0;bottom:0;padding:12px 12px calc(env(safe-area-inset-bottom) + 12px);
+    background:#000d;border-top:3px solid var(--y)}
+  #msg{font-size:22px;font-weight:700;margin:2px 0 6px;line-height:1.3}
+  .distbox{display:flex;align-items:center;gap:10px}
+  .distbox .val{flex:2;text-align:center;font-size:44px;font-weight:900;color:var(--y)}
+  .distbox button{flex:1}
+
+  /* finder */
+  #find{align-items:center;text-align:center}
+  #arrowWrap{flex:1;display:flex;align-items:center;justify-content:center;width:100%}
+  #arrow{width:min(70vw,46vh);height:min(70vw,46vh);transition:transform .15s linear}
+  #fdist{font-size:84px;font-weight:900;color:var(--y);line-height:1}
+  #fturn{font-size:34px;font-weight:800;margin:6px 0}
+  #fsub{font-size:19px;color:var(--dim)}
+  #find .btns{width:100%}
+  a{color:var(--y)}
+  .clubrow{display:flex;gap:8px;align-items:center;margin:6px 0}
+  .clubrow input[type=text]{flex:2;background:#111;color:#fff;border:2px solid #555;border-radius:10px;padding:8px;font-size:20px}
+  .clubrow input[type=number]{flex:1;font-size:20px;padding:8px}
+  .clubrow button{flex:0 0 52px;min-height:46px;border-radius:10px;border:0;background:#333;color:#fff;font-size:22px}
+</style>
+</head>
+<body>
+
+<!-- HOME -->
+<section id="home" class="screen on">
+  <div class="scroll">
+    <h1>Ball Spotter</h1>
+    <p>A friend films your shot, the app works out where it landed, then points you straight to it.</p>
+    <p class="muted">The first time, allow camera, microphone, location and motion when asked.</p>
+    <p id="envWarn" style="color:var(--bad);font-weight:700">If you can read this line, the app's code isn't running. Open it from its https web address in Safari or Chrome, not from a file preview.</p>
+    <button class="btn" id="bStart">START</button>
+    <button class="btn alt" id="bResume" style="display:none">Resume finding last ball</button>
+    <button class="btn alt small" id="bSettings">Clubs &amp; settings</button>
+    <button class="btn alt small" id="bHelp">How it works</button>
+    <p id="homeErr" style="color:var(--bad)"></p>
+  </div>
+</section>
+
+<!-- HELP -->
+<section id="help" class="screen">
+  <div class="scroll">
+    <h2>How it works</h2>
+    <p><b>1. Line up.</b> Your friend stands about 4 big steps straight behind the ball, looking down the target line, and holds the phone upright. They step forward or back until you fit inside the yellow box.</p>
+    <p><b>2. Ready.</b> Tap READY. The app listens for the hit, then tries to trace the ball.</p>
+    <p><b>3. Mark.</b> Your friend watches the ball land, puts the <b>+</b> on the spot where it came down and taps MARK. This is the most accurate step.</p>
+    <p><b>4. Distance.</b> The app uses your club's usual carry. Adjust it with Short / Long or ±10 if the shot was mishit.</p>
+    <p><b>5. Find.</b> Follow the big arrow. It beeps faster and talks as you get close. In the search zone, look in a circle about 15 yards wide.</p>
+    <p><b>Tip:</b> If the arrow seems wrong, wave the phone in a figure 8 to calibrate the compass, and set magnetic declination in Settings.</p>
+    <p><b>Tap "Found it"</b> when you find the ball. The app learns your real distance for that club.</p>
+  </div>
+  <button class="btn" data-go="home">Back</button>
+</section>
+
+<!-- SETTINGS -->
+<section id="settings" class="screen">
+  <div class="scroll">
+    <h2>Clubs (carry yards)</h2>
+    <div id="clubList"></div>
+    <button class="btn alt small" id="bAddClub">+ Add club</button>
+    <label>Golfer hits</label>
+    <select id="sHand"><option value="R">Right-handed</option><option value="L">Left-handed</option></select>
+    <label>Magnetic declination (° East = +, West = −)</label>
+    <input type="number" id="sDecl" step="0.5">
+    <p class="muted">Search "magnetic declination" and your town. It fixes compass error, which is often 5–15°.</p>
+    <label><input type="checkbox" id="sSound"> Beeps while finding</label>
+    <label><input type="checkbox" id="sVoice"> Spoken directions</label>
+    <label><input type="checkbox" id="sMic"> Detect the hit by sound</label>
+  </div>
+  <button class="btn" id="bSaveSettings">Save</button>
+</section>
+
+<!-- FILM -->
+<section id="film" class="screen">
+  <video id="video" playsinline muted autoplay></video>
+  <canvas id="overlay"></canvas>
+  <div id="topbar">
+    <span class="chip" id="cLevel">Level</span>
+    <span class="chip" id="cSteady">Steady</span>
+    <span class="chip" id="cGps">GPS…</span>
+    <span class="chip" id="cHead">Compass…</span>
+  </div>
+  <div id="panel">
+    <div id="msg"></div>
+    <div id="panelBody"></div>
+  </div>
+</section>
+
+<!-- FIND -->
+<section id="find" class="screen">
+  <div id="fsub">Waiting for GPS…</div>
+  <div id="arrowWrap">
+    <svg id="arrow" viewBox="0 0 100 100" aria-hidden="true">
+      <circle cx="50" cy="50" r="47" fill="none" stroke="#333" stroke-width="4"/>
+      <polygon points="50,6 80,58 60,52 60,92 40,92 40,52 20,58" fill="#FFD60A" stroke="#000" stroke-width="2"/>
+    </svg>
+  </div>
+  <div id="fdist">--</div>
+  <div id="fturn">&nbsp;</div>
+  <div id="fLie"></div>
+  <div class="btns">
+    <div class="row">
+      <button class="btn alt small" id="bSpeak">Say it</button>
+      <button class="btn alt small" id="bSoundT">Beeps: on</button>
+    </div>
+    <button class="btn go" id="bFound">FOUND IT</button>
+    <div class="row">
+      <button class="btn alt small" id="bNewShot">New shot</button>
+      <button class="btn alt small" id="bMap">Course map</button>
+    </div>
+  </div>
+</section>
+
+<!-- MAP -->
+<section id="mapScr" class="screen">
+  <div id="mapInfo">Loading course…</div>
+  <div id="map"></div>
+  <div class="row">
+    <button class="btn alt small" id="bMapMe">Show me</button>
+    <button class="btn small" id="bMapBack">Back to arrow</button>
+  </div>
+</section>
+
+<!-- FOUND -->
+<section id="found" class="screen">
+  <div class="scroll">
+    <h2>Nice!</h2>
+    <p class="big" id="foundTxt"></p>
+    <p id="foundTxt2"></p>
+  </div>
+  <button class="btn" id="bLearn">Update club distance</button>
+  <button class="btn alt" id="bNext">Next shot</button>
+</section>
+
+<script>
+"use strict";
+/* ---------- show any error on screen ---------- */
+function showErr(m) {
+  const e = document.getElementById("homeErr");
+  if (e) e.textContent = "Problem: " + m;
+  document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === "home"));
+}
+window.addEventListener("error", ev => showErr(ev.message || "unknown error"));
+window.addEventListener("unhandledrejection", ev => showErr((ev.reason && ev.reason.message) || String(ev.reason)));
+const withTimeout = (p, ms) => Promise.race([p, new Promise(r => setTimeout(r, ms))]);
+(function envCheck() {
+  const w = document.getElementById("envWarn");
+  if (!window.isSecureContext || location.protocol === "file:")
+    w.textContent = "This page isn't on a secure (https) web address, so the phone will block the camera, GPS and compass. Put it on GitHub Pages and open that link.";
+  else if (!navigator.mediaDevices || !navigator.mediaDevices.getUserMedia)
+    w.textContent = "This browser view can't use the camera. Open the link in Safari (iPhone) or Chrome (Android).";
+  else w.style.display = "none";
+})();
+/* ---------- helpers ---------- */
+const $ = id => document.getElementById(id);
+const rad = d => d * Math.PI / 180, deg = r => r * 180 / Math.PI;
+const norm360 = a => ((a % 360) + 360) % 360;
+const norm180 = a => { a = norm360(a); return a > 180 ? a - 360 : a; };
+const clamp = (v, a, b) => Math.max(a, Math.min(b, v));
+const YD = 1.09361;
+const DIRS = ['N','NE','E','SE','S','SW','W','NW'];
+
+/* ---------- settings ---------- */
+const DEF = {
+  clubs: [["Driver",200],["3 Wood",180],["5 Wood",170],["Hybrid",165],["5 Iron",155],["6 Iron",145],
+          ["7 Iron",135],["8 Iron",125],["9 Iron",115],["PW",105],["GW",95],["SW",80],["LW",60]],
+  hand: "R", decl: 0, sound: true, voice: true, mic: true, club: "Driver"
+};
+function loadCfg() {
+  try { const s = JSON.parse(localStorage.getItem("bs_cfg")); if (s) return Object.assign(JSON.parse(JSON.stringify(DEF)), s); } catch (e) {}
+  return JSON.parse(JSON.stringify(DEF));
+}
+function saveCfg() { try { localStorage.setItem("bs_cfg", JSON.stringify(cfg)); } catch (e) {} }
+function saveShot() { try { localStorage.setItem("bs_shot", JSON.stringify(S.shot)); } catch (e) {} }
+function loadShot() { try { return JSON.parse(localStorage.getItem("bs_shot")); } catch (e) { return null; } }
+let cfg = loadCfg();
+const clubCarry = name => { const c = cfg.clubs.find(c => c[0] === name); return c ? c[1] : 150; };
+
+/* ---------- state ---------- */
+const S = {
+  headingRaw: null, hsrc: "", beta: null, pos: null, acc: null, gpsOn: false,
+  stream: null, ac: null, analyser: null, noise: 0.02, lastHit: 0,
+  mode: "setup", armed: false, tracking: false,
+  ballV: null,            // ball start in video coords (null = default spot)
+  track: [], lastP: null, vel: null, miss: 0, trackT0: 0,
+  impactHeading: null, impactPos: null, traceBearing: null, markBearing: null,
+  dist: 0, shot: loadShot(), steady: 0, gshift: { x: 0, y: 0 },
+  lastSpeak: 0, lastSpokenYd: null, nextBeep: 0, findTimer: null
+};
+
+/* ---------- navigation ---------- */
+function show(id) {
+  document.querySelectorAll(".screen").forEach(s => s.classList.toggle("on", s.id === id));
+  if (id !== "film") stopCamera();
+  if (id !== "find") stopFinder();
+  if (id === "home") $("bResume").style.display = S.shot ? "block" : "none";
+}
+document.querySelectorAll("[data-go]").forEach(b => b.onclick = () => show(b.dataset.go));
+$("bHelp").onclick = () => show("help");
+
+/* ---------- sensors ---------- */
+function onOrient(e) {
+  if (e.beta != null) S.beta = e.beta;
+  let h = null;
+  if (typeof e.webkitCompassHeading === "number" && e.webkitCompassHeading >= 0) {
+    h = e.webkitCompassHeading; S.hsrc = "ios";
+  } else if ((e.absolute === true || e.type === "deviceorientationabsolute") && e.alpha != null && S.hsrc !== "ios") {
+    const a = rad(e.alpha), b = rad(e.beta), g = rad(e.gamma);
+    if (Math.abs(e.beta) > 45) {          // phone upright: direction the back camera faces
+      const E = -Math.cos(a) * Math.sin(g) - Math.sin(a) * Math.sin(b) * Math.cos(g);
+      const N = -Math.sin(a) * Math.sin(g) + Math.cos(a) * Math.sin(b) * Math.cos(g);
+      h = norm360(deg(Math.atan2(E, N)));
+    } else h = norm360(360 - e.alpha);     // phone flat: direction the top points
+    S.hsrc = "abs";
+  }
+  if (h == null) return;
+  S.headingRaw = S.headingRaw == null ? h : norm360(S.headingRaw + 0.25 * norm180(h - S.headingRaw));
+}
+function trueHeading() { return S.headingRaw == null ? null : norm360(S.headingRaw + Number(cfg.decl || 0)); }
+
+async function startSensors() {
+  try {
+    if (typeof DeviceOrientationEvent !== "undefined" && typeof DeviceOrientationEvent.requestPermission === "function")
+      await DeviceOrientationEvent.requestPermission();
+  } catch (e) {}
+  if (!S.orientOn) {
+    if ("ondeviceorientationabsolute" in window) window.addEventListener("deviceorientationabsolute", onOrient);
+    window.addEventListener("deviceorientation", onOrient);
+    S.orientOn = true;
+  }
+  if (!S.gpsOn && navigator.geolocation) {
+    navigator.geolocation.watchPosition(p => {
+      S.pos = { lat: p.coords.latitude, lon: p.coords.longitude }; S.acc = p.coords.accuracy;
+    }, err => { S.gpsErr = err.message; }, { enableHighAccuracy: true, maximumAge: 0, timeout: 30000 });
+    S.gpsOn = true;
+  }
+  try {
+    if (!S.ac) S.ac = new (window.AudioContext || window.webkitAudioContext)();
+    if (S.ac.state === "suspended") await S.ac.resume();
+  } catch (e) {}
+  try { if (window.speechSynthesis) speechSynthesis.speak(new SpeechSynthesisUtterance("")); } catch (e) {}
+}
+
+/* ---------- sound + voice ---------- */
+function beep(freq = 880, dur = 0.08, vol = 0.35) {
+  if (!S.ac || !cfg.sound) return;
+  try {
+    const t = S.ac.currentTime, o = S.ac.createOscillator(), g = S.ac.createGain();
+    o.type = "square"; o.frequency.value = freq;
+    g.gain.setValueAtTime(vol, t); g.gain.exponentialRampToValueAtTime(0.001, t + dur);
+    o.connect(g); g.connect(S.ac.destination); o.start(t); o.stop(t + dur + 0.02);
+  } catch (e) {}
+}
+function say(text, force) {
+  if (!window.speechSynthesis || (!cfg.voice && !force)) return;
+  try { speechSynthesis.cancel(); const u = new SpeechSynthesisUtterance(text); u.rate = 1; speechSynthesis.speak(u); } catch (e) {}
+}
+
+/* ---------- geo ---------- */
+function geoDest(p, brg, m) {
+  const R = 6371000, d = m / R, b = rad(brg), p1 = rad(p.lat), l1 = rad(p.lon);
+  const p2 = Math.asin(Math.sin(p1) * Math.cos(d) + Math.cos(p1) * Math.sin(d) * Math.cos(b));
+  const l2 = l1 + Math.atan2(Math.sin(b) * Math.sin(d) * Math.cos(p1), Math.cos(d) - Math.sin(p1) * Math.sin(p2));
+  return { lat: deg(p2), lon: deg(l2) };
+}
+function geoDist(a, b) {
+  const R = 6371000, dp = rad(b.lat - a.lat), dl = rad(b.lon - a.lon);
+  const h = Math.sin(dp / 2) ** 2 + Math.cos(rad(a.lat)) * Math.cos(rad(b.lat)) * Math.sin(dl / 2) ** 2;
+  return 2 * R * Math.asin(Math.sqrt(h));
+}
+function geoBearing(a, b) {
+  const p1 = rad(a.lat), p2 = rad(b.lat), dl = rad(b.lon - a.lon);
+  return norm360(deg(Math.atan2(Math.sin(dl) * Math.cos(p2), Math.cos(p1) * Math.sin(p2) - Math.sin(p1) * Math.cos(p2) * Math.cos(dl))));
+}
+
+/* ---------- camera ---------- */
+const video = $("video"), overlay = $("overlay"), octx = overlay.getContext("2d");
+const small = document.createElement("canvas"), sctx = small.getContext("2d", { willReadFrequently: true });
+let fullA = document.createElement("canvas"), fullB = document.createElement("canvas");
+let curCtx = fullA.getContext("2d", { willReadFrequently: true }), prevCtx = fullB.getContext("2d", { willReadFrequently: true });
+let prevSmall = null, VW = 0, VH = 0, GW = 80, GH = 142, hasPrevFull = false, rafId = 0;
+
+async function startCamera() {
+  if (S.stream) return true;
+  const wantMic = cfg.mic;
+  const v = { facingMode: { ideal: "environment" }, width: { ideal: 1280 }, height: { ideal: 720 }, frameRate: { ideal: 60 } };
+  try {
+    S.stream = await navigator.mediaDevices.getUserMedia({ video: v,
+      audio: wantMic ? { echoCancellation: false, noiseSuppression: false, autoGainControl: false } : false });
+  } catch (e) {
+    try { S.stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: "environment" } }); }
+    catch (e2) { S.camErr = (e2.name || "") + " " + (e2.message || ""); return false; }
+  }
+  video.srcObject = S.stream;
+  try { await video.play(); } catch (e) {}
+  if (S.stream.getAudioTracks().length && S.ac) {
+    try {
+      const src = S.ac.createMediaStreamSource(S.stream);
+      S.analyser = S.ac.createAnalyser(); S.analyser.fftSize = 2048;
+      src.connect(S.analyser); S.abuf = new Float32Array(S.analyser.fftSize);
+    } catch (e) { S.analyser = null; }
+  }
+  rafId = requestAnimationFrame(frame);
+  return true;
+}
+function stopCamera() {
+  cancelAnimationFrame(rafId);
+  if (S.stream) S.stream.getTracks().forEach(t => t.stop());
+  S.stream = null; S.analyser = null; prevSmall = null; hasPrevFull = false;
+  S.armed = false; S.tracking = false;
+}
+function sizeBuffers() {
+  VW = video.videoWidth; VH = video.videoHeight;
+  GW = 80; GH = Math.round(GW * VH / VW);
+  small.width = GW; small.height = GH;
+  fullA.width = fullB.width = VW; fullA.height = fullB.height = VH;
+  prevSmall = null; hasPrevFull = false;
+}
+function coverMap() {
+  const sw = overlay.clientWidth, sh = overlay.clientHeight, s = Math.max(sw / VW, sh / VH);
+  return { s, ox: (sw - VW * s) / 2, oy: (sh - VH * s) / 2 };
+}
+const v2s = (m, x, y) => [x * m.s + m.ox, y * m.s + m.oy];
+const s2v = (m, x, y) => [(x - m.ox) / m.s, (y - m.oy) / m.s];
+function hfov() {   // horizontal field of view of the video, degrees (typical phone main camera)
+  const longFov = 67, sh = Math.min(VW, VH), lg = Math.max(VW, VH);
+  const shortFov = deg(2 * Math.atan(Math.tan(rad(longFov / 2)) * sh / lg));
+  return VW < VH ? shortFov : longFov;
+}
+function angleFromX(x) { const f = (VW / 2) / Math.tan(rad(hfov() / 2)); return deg(Math.atan((x - VW / 2) / f)); }
+function defaultBall() { const m = coverMap(); const p = s2v(m, overlay.clientWidth * 0.5, overlay.clientHeight * 0.78); return { x: p[0], y: p[1] }; }
+
+/* luminance of an RGBA buffer */
+function lum(d, n) { const L = new Uint8Array(n); for (let i = 0, j = 0; i < n; i++, j += 4) L[i] = (d[j] * 77 + d[j + 1] * 150 + d[j + 2] * 29) >> 8; return L; }
+
+/* whole-frame camera shake: content moved by (dx,dy) from prev to cur */
+function globalShift(a, b, w, h) {
+  const R = 5; let best = Infinity, bx = 0, by = 0;
+  for (let dy = -R; dy <= R; dy++) for (let dx = -R; dx <= R; dx++) {
+    let s = 0;
+    for (let y = R; y < h - R; y += 2) { const row = y * w, prow = (y - dy) * w - dx; for (let x = R; x < w - R; x += 2) s += Math.abs(b[row + x] - a[prow + x]); }
+    if (s < best) { best = s; bx = dx; by = dy; }
+  }
+  return { x: bx, y: by };
+}
+
+/* look for a small moving blob in a window around (cx,cy) */
+function detect(cx, cy, r, g, filter) {
+  const x0 = clamp(Math.round(cx - r), 0, VW - 2), y0 = clamp(Math.round(cy - r), 0, VH - 2);
+  const w = Math.min(Math.round(2 * r), VW - x0), h = Math.min(Math.round(2 * r), VH - y0);
+  if (w < 8 || h < 8) return null;
+  const P = 8;
+  const px0 = clamp(x0 - Math.round(g.x) - P, 0, VW - 1), py0 = clamp(y0 - Math.round(g.y) - P, 0, VH - 1);
+  const pw = Math.min(w + 2 * P, VW - px0), ph = Math.min(h + 2 * P, VH - py0);
+  if (pw < 4 || ph < 4) return null;
+  const C = lum(curCtx.getImageData(x0, y0, w, h).data, w * h);
+  const Pv = lum(prevCtx.getImageData(px0, py0, pw, ph).data, pw * ph);
+  // prev pixel for cur (x,y) sits at (x + offX + sx, y + offY + sy) in Pv
+  const offX = x0 - Math.round(g.x) - px0, offY = y0 - Math.round(g.y) - py0;
+  const sad = (sx, sy) => { let s = 0, n = 0;
+    for (let y = 2; y < h - 2; y += 3) { const py = y + offY + sy; if (py < 1 || py >= ph - 1) continue;
+      for (let x = 2; x < w - 2; x += 3) { const px = x + offX + sx; if (px < 1 || px >= pw - 1) continue; s += Math.abs(C[y * w + x] - Pv[py * pw + px]); n++; } }
+    return n ? s / n : 1e9; };
+  let bs = 1e9, bx = 0, by = 0;
+  for (let sy = -6; sy <= 6; sy += 2) for (let sx = -6; sx <= 6; sx += 2) { const v = sad(sx, sy); if (v < bs) { bs = v; bx = sx; by = sy; } }
+  const cx2 = bx, cy2 = by;
+  for (let sy = cy2 - 1; sy <= cy2 + 1; sy++) for (let sx = cx2 - 1; sx <= cx2 + 1; sx++) { const v = sad(sx, sy); if (v < bs) { bs = v; bx = sx; by = sy; } }
+  // mask: pixel differs from every pixel in its 3x3 prev neighbourhood (tolerates small misalignment)
+  const T = 24, M = new Uint8Array(w * h);
+  for (let y = 1; y < h - 1; y++) { const py = y + offY + by; if (py < 1 || py >= ph - 1) continue;
+    for (let x = 1; x < w - 1; x++) { const px = x + offX + bx; if (px < 1 || px >= pw - 1) continue;
+      let mn = 255, mx = 0;
+      for (let k = -1; k <= 1; k++) { const base = (py + k) * pw + px; for (let l = -1; l <= 1; l++) { const v = Pv[base + l]; if (v < mn) mn = v; if (v > mx) mx = v; } }
+      const c = C[y * w + x];
+      if (c - mx > T || mn - c > T) M[y * w + x] = 1;
+    } }
+  // connected blobs
+  const cands = [], stack = [];
+  for (let i = 0; i < M.length; i++) {
+    if (M[i] !== 1) continue;
+    let area = 0, sx = 0, sy = 0; M[i] = 2; stack.push(i);
+    while (stack.length) {
+      const j = stack.pop(), jx = j % w, jy = (j / w) | 0; area++; sx += jx; sy += jy;
+      if (area > 900) continue;
+      for (let k = -1; k <= 1; k++) for (let l = -1; l <= 1; l++) {
+        const nx = jx + l, ny = jy + k; if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
+        const q = ny * w + nx; if (M[q] === 1) { M[q] = 2; stack.push(q); }
+      }
+    }
+    if (area >= 1 && area <= 500) cands.push({ x: x0 + sx / area, y: y0 + sy / area, area });
+  }
+  let best = null, bd = Infinity;
+  for (const c of cands) { if (filter && !filter(c)) continue; const d = Math.hypot(c.x - cx, c.y - cy); if (d < bd) { bd = d; best = c; } }
+  return best && bd <= r * 1.2 ? best : null;
+}
+
+function frame() {
+  rafId = requestAnimationFrame(frame);
+  if (!video.videoWidth) return;
+  if (video.videoWidth !== VW || video.videoHeight !== VH) sizeBuffers();
+  // shake estimate
+  sctx.drawImage(video, 0, 0, GW, GH);
+  const sm = lum(sctx.getImageData(0, 0, GW, GH).data, GW * GH);
+  if (prevSmall) {
+    const gs = globalShift(prevSmall, sm, GW, GH);
+    S.gshift = { x: gs.x * VW / GW, y: gs.y * VH / GH };
+    S.steady = S.steady * 0.85 + Math.hypot(gs.x, gs.y) * 0.15;
+  }
+  prevSmall = sm;
+  // hit by sound
+  if (S.armed && S.analyser) {
+    S.analyser.getFloatTimeDomainData(S.abuf);
+    let pk = 0; for (let i = 0; i < S.abuf.length; i++) { const v = Math.abs(S.abuf[i]); if (v > pk) pk = v; }
+    if (pk > Math.max(0.2, S.noise * 6) && performance.now() - S.armedAt > 600) onImpact();
+    else S.noise = S.noise * 0.97 + pk * 0.03;
+  }
+  // full-res frames while armed/tracking
+  if (S.armed || S.tracking) {
+    curCtx.drawImage(video, 0, 0, VW, VH);
+    if (S.tracking && hasPrevFull) trackStep();
+    const t = curCtx; curCtx = prevCtx; prevCtx = t; hasPrevFull = true;
+  }
+  drawOverlay();
+  updateChips();
+}
+
+/* ---------- shot flow ---------- */
+function onImpact() {
+  if (!S.armed) return;
+  S.armed = false; S.tracking = true; S.trackT0 = performance.now();
+  S.track = []; S.lastP = null; S.vel = null; S.miss = 0;
+  S.impactHeading = trueHeading();
+  S.impactPos = S.pos ? { ...S.pos } : null;
+  beep(1200, 0.12);
+  setMode("tracking");
+}
+function trackStep() {
+  const g = S.gshift, start = S.ballV || defaultBall();
+  let det;
+  if (!S.lastP) {
+    const r = VW * 0.22;
+    det = detect(start.x, start.y - r * 0.6, r, g, c => c.y < start.y - 2 && c.area < 400);
+  } else {
+    S.lastP.x += g.x; S.lastP.y += g.y;
+    const v = S.vel || { x: 0, y: -10 };
+    const pred = { x: S.lastP.x + v.x, y: S.lastP.y + v.y };
+    const r = Math.max(22, Math.hypot(v.x, v.y) * 1.5 + 12) + S.miss * 6;
+    det = detect(pred.x, pred.y, r, g);
+  }
+  if (det) {
+    if (S.lastP) { const nv = { x: det.x - S.lastP.x, y: det.y - S.lastP.y };
+      S.vel = S.vel ? { x: S.vel.x * 0.5 + nv.x * 0.5, y: S.vel.y * 0.5 + nv.y * 0.5 } : nv; }
+    S.lastP = { x: det.x, y: det.y }; S.miss = 0;
+    S.track.push({ x: det.x, y: det.y, h: trueHeading() });
+  } else if (S.lastP) {
+    S.miss++; if (S.vel) { S.lastP.x += S.vel.x; S.lastP.y += S.vel.y; }
+  } else S.miss++;
+  const el = performance.now() - S.trackT0;
+  if ((S.lastP && S.miss > 10) || (!S.lastP && S.miss > 40) || el > 3500) finishTrack();
+}
+function finishTrack() {
+  S.tracking = false; S.traceBearing = null;
+  if (S.track.length >= 3) {
+    const p = S.track[S.track.length - 1];
+    if (p.h != null) S.traceBearing = norm360(p.h + angleFromX(p.x));
+  }
+  beep(660, 0.1);
+  setMode("mark");
+}
+
+function setMode(m) {
+  S.mode = m;
+  const msg = $("msg"), body = $("panelBody");
+  const clubSel = () => `<select id="clubSel">${cfg.clubs.map(c => `<option${c[0] === cfg.club ? " selected" : ""}>${c[0]}</option>`).join("")}</select>`;
+  if (m === "setup") {
+    msg.innerHTML = "Stand ~4 big steps behind the ball. Fit the golfer in the box. Tap the ball if it isn't in the circle.";
+    body.innerHTML = `${clubSel()}<div class="row"><button class="btn alt small" id="bBack">Back</button><button class="btn" id="bReady">READY</button></div>`;
+    $("bBack").onclick = () => show("home");
+    $("bReady").onclick = () => { if (!S.ballV) S.ballV = defaultBall(); S.armed = true; S.armedAt = performance.now(); hasPrevFull = false; setMode("armed"); };
+  } else if (m === "armed") {
+    msg.innerHTML = S.analyser && cfg.mic ? "Listening for the hit… keep the phone still." : "Tap BALL HIT the moment it's struck.";
+    body.innerHTML = `<button class="btn" id="bHit">BALL HIT</button><button class="btn alt small" id="bCancel">Cancel</button>`;
+    $("bHit").onclick = onImpact;
+    $("bCancel").onclick = () => { S.armed = false; setMode("setup"); };
+  } else if (m === "tracking") {
+    msg.innerHTML = "Tracking… follow the ball with the phone.";
+    body.innerHTML = "";
+  } else if (m === "mark") {
+    let t = "Watch it land. Put the <b>+</b> on where it landed, then tap MARK.";
+    if (S.traceBearing != null && S.impactHeading != null) {
+      const off = Math.round(norm180(S.traceBearing - S.impactHeading));
+      t = `Ball started ${Math.abs(off) < 2 ? "straight" : Math.abs(off) + "° " + (off > 0 ? "right" : "left")}. ` + t;
+    } else if (!S.track.length) t = "Couldn't trace it — that's OK. " + t;
+    msg.innerHTML = t;
+    body.innerHTML = `<button class="btn" id="bMark">MARK LANDING SPOT</button>
+      <div class="row">${S.traceBearing != null ? '<button class="btn alt small" id="bUseTrace">Use trace</button>' : ""}
+      <button class="btn alt small" id="bStraight">It went straight</button></div>`;
+    $("bMark").onclick = () => { const h = trueHeading(); if (h == null) { msg.innerHTML = "No compass reading yet — move the phone in a figure 8, then try again."; return; } S.markBearing = h; toDistance(); };
+    if ($("bUseTrace")) $("bUseTrace").onclick = () => { S.markBearing = S.traceBearing; toDistance(); };
+    $("bStraight").onclick = () => { S.markBearing = S.impactHeading ?? trueHeading(); toDistance(); };
+  } else if (m === "distance") {
+    msg.innerHTML = "How far did it go?";
+    body.innerHTML = `${clubSel()}
+      <div class="distbox"><button class="btn alt" id="bMinus">−10</button><div class="val" id="dVal"></div><button class="btn alt" id="bPlus">+10</button></div>
+      <div class="row"><button class="btn alt small" id="bShort">Short</button><button class="btn alt small" id="bNorm">Normal</button><button class="btn alt small" id="bLong">Long</button></div>
+      <button class="btn go" id="bFind">FIND MY BALL</button>`;
+    const upd = () => $("dVal").textContent = S.dist + " yd";
+    const base = () => clubCarry(cfg.club);
+    S.dist = base(); upd();
+    $("clubSel").onchange = e => { cfg.club = e.target.value; saveCfg(); S.dist = base(); upd(); };
+    $("bMinus").onclick = () => { S.dist = Math.max(5, S.dist - 10); upd(); };
+    $("bPlus").onclick = () => { S.dist += 10; upd(); };
+    $("bShort").onclick = () => { S.dist = Math.round(base() * 0.8); upd(); };
+    $("bNorm").onclick = () => { S.dist = base(); upd(); };
+    $("bLong").onclick = () => { S.dist = Math.round(base() * 1.1); upd(); };
+    $("bFind").onclick = makeShot;
+  }
+  const cs = $("clubSel"); if (cs && m !== "distance") cs.onchange = e => { cfg.club = e.target.value; saveCfg(); };
+}
+function toDistance() { setMode("distance"); }
+
+function makeShot() {
+  let start = S.impactPos || S.pos;
+  if (!start) { $("msg").innerHTML = "Still waiting for GPS. Step into the open and try again in a moment."; return; }
+  // the filmer stands ~4 m behind the ball
+  if (S.impactHeading != null) start = geoDest(start, S.impactHeading, 4);
+  const target = geoDest(start, S.markBearing, S.dist / YD);
+  S.shot = { start, target, club: cfg.club, plan: S.dist, t: Date.now() };
+  saveShot();
+  show("find"); startFinder();
+}
+
+/* ---------- overlay ---------- */
+function drawOverlay() {
+  const dpr = window.devicePixelRatio || 1, W = overlay.clientWidth, H = overlay.clientHeight;
+  if (overlay.width !== W * dpr) { overlay.width = W * dpr; overlay.height = H * dpr; }
+  octx.setTransform(dpr, 0, 0, dpr, 0, 0); octx.clearRect(0, 0, W, H);
+  const m = coverMap();
+  octx.lineCap = "round";
+  if (S.mode === "setup" || S.mode === "armed") {
+    // golfer box: golfer stands left of the ball (right-hander, seen from behind)
+    const left = cfg.hand === "R";
+    const bx = left ? W * 0.10 : W * 0.58, bw = W * 0.32, by = H * 0.45, bh = H * 0.34;
+    octx.strokeStyle = "#FFD60A"; octx.lineWidth = 4; octx.setLineDash([14, 10]);
+    octx.strokeRect(bx, by, bw, bh); octx.setLineDash([]);
+    octx.fillStyle = "#FFD60A"; octx.font = "bold 18px system-ui";
+    octx.fillText("head", bx + 6, by - 8); octx.fillText("feet", bx + 6, by + bh + 22);
+    const b = S.ballV ? v2s(m, S.ballV.x, S.ballV.y) : [W * 0.5, H * 0.78];
+    octx.lineWidth = 4; octx.beginPath(); octx.arc(b[0], b[1], 22, 0, Math.PI * 2); octx.stroke();
+    octx.fillText("ball", b[0] + 28, b[1] + 6);
+    // target line
+    octx.globalAlpha = 0.5; octx.beginPath(); octx.moveTo(b[0], b[1] - 26); octx.lineTo(W * 0.5, H * 0.12); octx.stroke(); octx.globalAlpha = 1;
+  }
+  // trace
+  if (S.track.length) {
+    octx.strokeStyle = "#FF5A4E"; octx.lineWidth = 5; octx.beginPath();
+    const st = S.ballV ? v2s(m, S.ballV.x, S.ballV.y) : null; if (st) octx.moveTo(st[0], st[1]);
+    S.track.forEach((p, i) => { const s = v2s(m, p.x, p.y); if (i === 0 && !st) octx.moveTo(s[0], s[1]); else octx.lineTo(s[0], s[1]); });
+    octx.stroke();
+  }
+  // crosshair
+  const cx = W / 2, cy = H / 2, big = S.mode === "mark" ? 46 : 22;
+  octx.strokeStyle = "#000"; octx.lineWidth = 9;
+  octx.beginPath(); octx.moveTo(cx - big, cy); octx.lineTo(cx + big, cy); octx.moveTo(cx, cy - big); octx.lineTo(cx, cy + big); octx.stroke();
+  octx.strokeStyle = S.mode === "mark" ? "#FFD60A" : "#fff"; octx.lineWidth = 5;
+  octx.beginPath(); octx.moveTo(cx - big, cy); octx.lineTo(cx + big, cy); octx.moveTo(cx, cy - big); octx.lineTo(cx, cy + big); octx.stroke();
+}
+function chip(id, txt, state) { const c = $(id); c.textContent = txt; c.className = "chip" + (state ? " " + state : ""); }
+function updateChips() {
+  if (S.beta == null) chip("cLevel", "Tilt ?", "");
+  else if (S.beta < 70) chip("cLevel", "Tilt up ↑", "bad");
+  else if (S.beta > 105) chip("cLevel", "Tilt down ↓", "bad");
+  else chip("cLevel", "Level ✓", "ok");
+  chip("cSteady", S.steady > 1.2 ? "Hold steady" : "Steady ✓", S.steady > 1.2 ? "bad" : "ok");
+  if (!S.pos) chip("cGps", "GPS…", "bad");
+  else chip("cGps", "GPS ±" + Math.round(S.acc * YD) + "yd", S.acc < 12 ? "ok" : "bad");
+  const h = trueHeading();
+  chip("cHead", h == null ? "Compass…" : "Facing " + DIRS[Math.round(h / 45) % 8], h == null ? "bad" : "ok");
+}
+overlay.addEventListener("click", e => {
+  if (S.mode !== "setup" || !VW) return;
+  const r = overlay.getBoundingClientRect(), m = coverMap();
+  const p = s2v(m, e.clientX - r.left, e.clientY - r.top); S.ballV = { x: p[0], y: p[1] }; beep(1000, 0.05);
+});
+
+/* ---------- finder ---------- */
+function startFinder(quiet) {
+  stopFinder();
+  $("bSoundT").textContent = "Beeps: " + (cfg.sound ? "on" : "off");
+  S.lastSpokenYd = null; S.lastSpeak = quiet ? Date.now() : 0;
+  S.findTimer = setInterval(finderTick, 100);
+  if (!quiet) { say("Finding your ball."); loadCourse(); }
+  showLie();
+}
+
+/* ---------- course map (OpenStreetMap golf features) ---------- */
+const COURSE = { key: null, feats: [], status: "" };
+const FEAT_STYLE = {
+  green: { color: "#3BE37A", weight: 3, fillOpacity: 0.35, label: "the green" },
+  fairway: { color: "#B7F28B", weight: 2, fillOpacity: 0.18, label: "the fairway" },
+  tee: { color: "#ffffff", weight: 2, fillOpacity: 0.2, label: "a tee box" },
+  bunker: { color: "#F2D49B", weight: 2, fillOpacity: 0.5, label: "a bunker" },
+  water: { color: "#4DA3FF", weight: 2, fillOpacity: 0.45, label: "water" },
+  rough: { color: "#6E9E4F", weight: 1, fillOpacity: 0.1, label: "the rough" },
+  hole: { color: "#FFD60A", weight: 2, fillOpacity: 0, dash: "6 6", label: "" }
+};
+function featKind(t) {
+  const g = t.golf;
+  if (g === "green") return "green";
+  if (g === "fairway") return "fairway";
+  if (g === "tee") return "tee";
+  if (g === "bunker" || t.natural === "sand") return "bunker";
+  if (g === "water_hazard" || g === "lateral_water_hazard" || t.natural === "water" || t.waterway) return "water";
+  if (g === "rough") return "rough";
+  if (g === "hole") return "hole";
+  return null;
+}
+async function loadCourse() {
+  if (!S.shot) return;
+  const t = S.shot.target, key = t.lat.toFixed(3) + "," + t.lon.toFixed(3);
+  if (COURSE.key === key && COURSE.feats.length) return;
+  COURSE.key = key; COURSE.feats = []; COURSE.status = "loading";
+  const d = 0.009; // ~1 km box around the ball
+  const bb = `${t.lat - d},${t.lon - d * 1.4},${t.lat + d},${t.lon + d * 1.4}`;
+  const q = `[out:json][timeout:25];(way["golf"](${bb});relation["golf"](${bb});way["natural"~"water|sand"](${bb});relation["natural"="water"](${bb}););out geom;`;
+  try {
+    const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q),
+      headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+    const j = await r.json();
+    for (const el of j.elements || []) {
+      const kind = featKind(el.tags || {}); if (!kind) continue;
+      const rings = [];
+      if (el.type === "way" && el.geometry) rings.push(el.geometry.map(p => [p.lat, p.lon]));
+      if (el.type === "relation" && el.members) el.members.forEach(m => { if (m.role !== "inner" && m.geometry) rings.push(m.geometry.map(p => [p.lat, p.lon])); });
+      rings.forEach(ring => COURSE.feats.push({ kind, ring, ref: (el.tags || {}).ref, par: (el.tags || {}).par }));
+    }
+    COURSE.status = COURSE.feats.length ? "ok" : "empty";
+  } catch (e) { COURSE.status = "error"; }
+  showLie(true);
+  if ($("mapScr").classList.contains("on")) drawMap();
+}
+function inRing(lat, lon, ring) {
+  let inside = false;
+  for (let i = 0, j = ring.length - 1; i < ring.length; j = i++) {
+    const [yi, xi] = ring[i], [yj, xj] = ring[j];
+    if ((yi > lat) !== (yj > lat) && lon < (xj - xi) * (lat - yi) / (yj - yi) + xi) inside = !inside;
+  }
+  return inside;
+}
+function lieAt(p) {   // which course feature the estimated spot falls in (most specific wins)
+  const order = ["water", "bunker", "green", "tee", "fairway", "rough"];
+  for (const k of order) for (const f of COURSE.feats) if (f.kind === k && f.ring.length > 2 && inRing(p.lat, p.lon, f.ring)) return k;
+  return null;
+}
+function nearestGreen(p) {
+  let best = null;
+  for (const f of COURSE.feats) if (f.kind === "green") {
+    const c = f.ring.reduce((a, q) => [a[0] + q[0] / f.ring.length, a[1] + q[1] / f.ring.length], [0, 0]);
+    const yd = geoDist(p, { lat: c[0], lon: c[1] }) * YD;
+    if (!best || yd < best) best = yd;
+  }
+  return best;
+}
+function showLie(speakIt) {
+  if (!S.shot) return;
+  let t = "";
+  if (COURSE.status === "loading") t = "Loading course map…";
+  else if (COURSE.status === "ok") {
+    const k = lieAt(S.shot.target), g = nearestGreen(S.shot.target);
+    t = k ? "Probably in " + FEAT_STYLE[k].label : "Probably in the rough";
+    if (g != null && g < 300) t += ` · ${Math.round(g)} yd to green`;
+    $("fLie").style.color = k === "water" ? "#4DA3FF" : k === "bunker" ? "#F2D49B" : "var(--ok)";
+    if (speakIt && k === "water") say("Heads up. The ball may be in the water.");
+  } else if (COURSE.status === "empty") t = "This course isn't mapped yet";
+  else if (COURSE.status === "error") t = "Course map unavailable (no signal?)";
+  $("fLie").textContent = t;
+}
+let MAP = null, mapLayer = null, meMarker = null, mapTimer = null;
+function drawMap() {
+  if (typeof L === "undefined") { $("mapInfo").textContent = "Map needs an internet connection."; return; }
+  if (!MAP) {
+    MAP = L.map("map", { zoomControl: true, attributionControl: true });
+    L.tileLayer("https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}",
+      { maxZoom: 20, maxNativeZoom: 19, attribution: "Imagery © Esri · Course © OpenStreetMap contributors" }).addTo(MAP);
+  }
+  if (mapLayer) mapLayer.remove();
+  mapLayer = L.layerGroup().addTo(MAP);
+  for (const f of COURSE.feats) {
+    const st = FEAT_STYLE[f.kind];
+    if (f.kind === "hole") L.polyline(f.ring, { color: st.color, weight: st.weight, dashArray: st.dash }).addTo(mapLayer);
+    else L.polygon(f.ring, { color: st.color, weight: st.weight, fillColor: st.color, fillOpacity: st.fillOpacity }).addTo(mapLayer);
+  }
+  const t = S.shot.target, s = S.shot.start;
+  L.polyline([[s.lat, s.lon], [t.lat, t.lon]], { color: "#FF5A4E", weight: 4 }).addTo(mapLayer);
+  L.circle([t.lat, t.lon], { radius: 15 / YD, color: "#FFD60A", weight: 4, fillOpacity: 0.15 }).addTo(mapLayer);
+  L.circleMarker([t.lat, t.lon], { radius: 9, color: "#000", weight: 3, fillColor: "#FFD60A", fillOpacity: 1 }).addTo(mapLayer);
+  MAP.setView([t.lat, t.lon], 18);
+  setTimeout(() => MAP.invalidateSize(), 50);
+  const lie = $("fLie").textContent;
+  $("mapInfo").textContent = lie || "Yellow circle = search zone";
+}
+function updateMe() {
+  if (!MAP || !S.pos) return;
+  if (!meMarker) meMarker = L.circleMarker([S.pos.lat, S.pos.lon], { radius: 10, color: "#fff", weight: 4, fillColor: "#2D7DFF", fillOpacity: 1 });
+  meMarker.setLatLng([S.pos.lat, S.pos.lon]);
+  if (!MAP.hasLayer(meMarker)) meMarker.addTo(MAP);
+}
+$("bMap").onclick = () => { show("mapScr"); drawMap(); updateMe(); mapTimer = setInterval(updateMe, 1000); if (COURSE.status !== "ok") loadCourse(); };
+$("bMapMe").onclick = () => { if (MAP && S.pos && S.shot) MAP.fitBounds([[S.pos.lat, S.pos.lon], [S.shot.target.lat, S.shot.target.lon]], { padding: [40, 40] }); };
+$("bMapBack").onclick = () => { clearInterval(mapTimer); show("find"); startFinder(true); };
+function stopFinder() { if (S.findTimer) clearInterval(S.findTimer); S.findTimer = null; }
+function finderInfo() {
+  if (!S.pos || !S.shot) return null;
+  const yd = geoDist(S.pos, S.shot.target) * YD, brg = geoBearing(S.pos, S.shot.target), h = trueHeading();
+  const rel = h == null ? null : norm180(brg - h);
+  let turn = "Turn around";
+  if (rel == null) turn = "Compass not ready";
+  else if (Math.abs(rel) <= 20) turn = "Straight ahead";
+  else if (Math.abs(rel) <= 70) turn = rel > 0 ? "Bear right" : "Bear left";
+  else if (Math.abs(rel) <= 135) turn = rel > 0 ? "Turn right" : "Turn left";
+  return { yd, rel, turn, zone: yd <= Math.max(15, (S.acc || 5) * YD) };
+}
+function spoken(i) {
+  if (i.zone) return "You're in the search zone. Look around within about 15 yards.";
+  return Math.round(i.yd / 5) * 5 + " yards. " + i.turn + ".";
+}
+function finderTick() {
+  const i = finderInfo();
+  if (!i) { $("fsub").textContent = S.pos ? "Waiting for compass…" : "Waiting for GPS…"; return; }
+  $("fdist").textContent = Math.round(i.yd) + " yd";
+  $("fturn").textContent = i.zone ? "SEARCH HERE" : i.turn;
+  $("fturn").style.color = i.zone ? "var(--ok)" : "var(--fg)";
+  $("fsub").textContent = "GPS ±" + Math.round((S.acc || 0) * YD) + " yd · " + S.shot.club + " · planned " + S.shot.plan + " yd";
+  if (i.rel != null) $("arrow").style.transform = `rotate(${i.rel}deg)`;
+  const now = Date.now();
+  // beeps: faster when closer, higher pitch when pointed the right way
+  if (now >= S.nextBeep) {
+    const gap = clamp(i.yd * 12, 200, 2000);
+    beep(i.rel != null && Math.abs(i.rel) < 20 ? 1100 : 550, 0.07);
+    if (i.yd < 20 && navigator.vibrate) navigator.vibrate(60);
+    S.nextBeep = now + gap;
+  }
+  // voice: every 15 s or every 20 yards
+  const bucket = Math.floor(i.yd / 20);
+  if (now - S.lastSpeak > 15000 || (S.lastSpokenYd != null && bucket !== S.lastSpokenYd)) {
+    say(spoken(i)); S.lastSpeak = now; S.lastSpokenYd = bucket;
+  }
+  if (S.lastSpokenYd == null) S.lastSpokenYd = bucket;
+}
+$("bSpeak").onclick = () => { const i = finderInfo(); say(i ? spoken(i) : "Waiting for GPS.", true); };
+$("bSoundT").onclick = () => { cfg.sound = !cfg.sound; saveCfg(); $("bSoundT").textContent = "Beeps: " + (cfg.sound ? "on" : "off"); };
+$("bNewShot").onclick = () => openFilm();
+$("bFound").onclick = () => {
+  if (!S.shot) return;
+  const act = S.pos ? Math.round(geoDist(S.shot.start, S.pos) * YD) : null;
+  const miss = S.pos ? Math.round(geoDist(S.shot.target, S.pos) * YD) : null;
+  S.found = act;
+  $("foundTxt").textContent = act != null ? `That ${S.shot.club} went about ${act} yards.` : "Found it!";
+  $("foundTxt2").textContent = miss != null ? `The estimate was ${miss} yards off. Tap "Update club distance" so the next guess is closer. Only do this for a normal swing.` : "";
+  $("bLearn").style.display = act != null ? "block" : "none";
+  say("Found it. Nice.");
+  show("found");
+};
+$("bLearn").onclick = () => {
+  const c = cfg.clubs.find(c => c[0] === S.shot.club);
+  if (c && S.found) { c[1] = Math.round(c[1] * 0.7 + S.found * 0.3); saveCfg(); $("foundTxt2").textContent = `${c[0]} now set to ${c[1]} yards.`; $("bLearn").style.display = "none"; }
+};
+$("bNext").onclick = () => { S.shot = null; try { localStorage.removeItem("bs_shot"); } catch (e) {} openFilm(); };
+
+/* ---------- start ---------- */
+async function openFilm() {
+  show("film");
+  S.ballV = null; S.track = []; S.traceBearing = null; S.markBearing = null; S.impactPos = null;
+  setMode("setup");
+  const ok = await startCamera();
+  if (!ok) {
+    show("home");
+    const why = S.camErr || "";
+    $("homeErr").textContent = /NotAllowed|Permission/i.test(why)
+      ? "Camera was blocked. iPhone: Settings → Safari → Camera → Allow. Android: tap the lock icon by the address → Permissions → Camera. Then reload."
+      : "Camera didn't start (" + why.trim() + "). Open the https link in Safari or Chrome.";
+  }
+}
+$("bStart").onclick = async () => {
+  $("bStart").textContent = "Starting…"; $("homeErr").textContent = "";
+  try { await withTimeout(startSensors(), 5000); } catch (e) {}
+  $("bStart").textContent = "START";
+  openFilm().catch(e => showErr("camera: " + e.message));
+};
+$("bResume").onclick = async () => { try { await withTimeout(startSensors(), 5000); } catch (e) {} if (S.shot) { show("find"); startFinder(); } };
+
+/* ---------- settings ---------- */
+function renderClubs() {
+  $("clubList").innerHTML = cfg.clubs.map((c, i) =>
+    `<div class="clubrow"><input type="text" value="${c[0].replace(/"/g, "&quot;")}" data-i="${i}" data-k="0">
+     <input type="number" value="${c[1]}" data-i="${i}" data-k="1"><button data-del="${i}">✕</button></div>`).join("");
+  $("clubList").querySelectorAll("input").forEach(inp => inp.oninput = () => {
+    const i = +inp.dataset.i, k = +inp.dataset.k; cfg.clubs[i][k] = k ? Number(inp.value) || 0 : inp.value; });
+  $("clubList").querySelectorAll("[data-del]").forEach(b => b.onclick = () => { cfg.clubs.splice(+b.dataset.del, 1); renderClubs(); });
+}
+$("bSettings").onclick = () => {
+  renderClubs(); $("sHand").value = cfg.hand; $("sDecl").value = cfg.decl;
+  $("sSound").checked = cfg.sound; $("sVoice").checked = cfg.voice; $("sMic").checked = cfg.mic;
+  show("settings");
+};
+$("bAddClub").onclick = () => { cfg.clubs.push(["New club", 100]); renderClubs(); };
+$("bSaveSettings").onclick = () => {
+  cfg.clubs = cfg.clubs.filter(c => String(c[0]).trim());
+  cfg.hand = $("sHand").value; cfg.decl = Number($("sDecl").value) || 0;
+  cfg.sound = $("sSound").checked; cfg.voice = $("sVoice").checked; cfg.mic = $("sMic").checked;
+  if (!cfg.clubs.find(c => c[0] === cfg.club) && cfg.clubs.length) cfg.club = cfg.clubs[0][0];
+  saveCfg(); show("home");
+};
+show("home");
+</script>
+</body>
+</html>
