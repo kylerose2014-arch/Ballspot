@@ -121,6 +121,7 @@
     <p class="muted">The first time, allow camera, microphone, location and motion when asked.</p>
     <p id="envWarn" style="color:var(--bad);font-weight:700">If you can read this line, the app's code isn't running. Open it from its https web address in Safari or Chrome, not from a file preview.</p>
     <button class="btn" id="bStart">START</button>
+    <button class="btn alt" id="bRange">DRIVING RANGE</button>
     <button class="btn alt" id="bResume" style="display:none">Resume finding last ball</button>
     <button class="btn alt small" id="bCourse">Course: <span id="homeCourse">none</span></button>
     <button class="btn alt small" id="bCard">Scorecard</button>
@@ -150,6 +151,8 @@
   <div class="scroll">
     <h2>Your course</h2>
     <p class="big" id="courseCur"></p>
+    <p id="mapState" style="font-weight:700"></p>
+    <button class="btn small" id="bDlMap">Download course map</button>
     <div id="courseSaved"></div>
     <h2>Find a course</h2>
     <button class="btn small" id="bNear">Courses near me</button>
@@ -169,6 +172,17 @@
   <div class="scroll" style="margin-top:8px"><table id="cardTbl"></table></div>
   <div id="cardTot" class="big" style="margin:8px 0;text-align:center"></div>
   <div class="row"><button class="btn alt small" id="bNewRound">New round</button><button class="btn small" data-go="home">Done</button></div>
+</section>
+
+<!-- RANGE STATS -->
+<section id="range" class="screen">
+  <h2>Range stats</h2>
+  <div class="row"><select id="rClub"></select><select id="rWhen"><option value="s">This session</option><option value="a">All time</option></select></div>
+  <canvas id="rPlot" style="width:100%;height:38vh;margin:8px 0;border-radius:12px;background:#0d1f12"></canvas>
+  <div class="scroll"><table id="rTbl" style="width:100%;border-collapse:collapse;font-size:19px;text-align:center"></table>
+    <p class="muted" id="rNote"></p></div>
+  <div class="row"><button class="btn alt small" id="bRLearn">Teach my clubs</button><button class="btn alt small" id="bRClear">Clear</button></div>
+  <button class="btn" id="bRBack">Back to hitting</button>
 </section>
 
 <!-- SETTINGS -->
@@ -310,7 +324,7 @@ const DEF = {
       }
     }
   }],
-  courseId: "pryor-elmer", tee: "White", curHole: 1, scores: {}
+  courseId: "pryor-elmer", tee: "White", curHole: 1, scores: {}, rangeShots: []
 };
 function loadCfg() {
   try { const s = JSON.parse(localStorage.getItem("bs_cfg")); if (s) return Object.assign(JSON.parse(JSON.stringify(DEF)), s); } catch (e) {}
@@ -648,7 +662,21 @@ function setMode(m) {
   S.mode = m;
   const msg = $("msg"), body = $("panelBody");
   const clubSel = () => `<select id="clubSel">${cfg.clubs.map(c => `<option${c[0] === cfg.club ? " selected" : ""}>${c[0]}</option>`).join("")}</select>`;
-  if (m === "setup") {
+  if (m === "setup" && S.range) {
+    const n = cfg.rangeShots.filter(s => s.t > S.rangeStart).length;
+    msg.innerHTML = S.rangeTarget == null
+      ? "RANGE: Stand behind the ball, put the <b>+</b> on your target flag and tap SET TARGET."
+      : `RANGE · ${n} shot${n === 1 ? "" : "s"} this session. Golfer in the box, then READY.`;
+    body.innerHTML = `${clubSel()}<div class="row"><button class="btn alt small" id="bSetT">${S.rangeTarget == null ? "SET TARGET" : "Re-aim target"}</button>
+      <button class="btn alt small" id="bStats">Stats</button></div>
+      <div class="row"><button class="btn alt small" id="bBack">Exit</button><button class="btn" id="bReady">READY</button></div>`;
+    $("bBack").onclick = () => { S.range = false; show("home"); };
+    $("bStats").onclick = () => { renderRange(); show("range"); };
+    $("bSetT").onclick = () => { const h = trueHeading(); if (h == null) { msg.innerHTML = "No compass yet. Move the phone in a figure 8, then try again."; return; }
+      S.rangeTarget = h; beep(1000, 0.08); setMode("setup"); };
+    $("bReady").onclick = () => { if (S.rangeTarget == null) S.rangeTarget = trueHeading();
+      if (!S.ballV) S.ballV = defaultBall(); S.armed = true; S.armedAt = performance.now(); hasPrevFull = false; setMode("armed"); };
+  } else if (m === "setup") {
     msg.innerHTML = "Stand ~4 big steps behind the ball. Fit the golfer in the box. Tap the ball if it isn't in the circle.";
     body.innerHTML = `${clubSel()}<div class="row"><button class="btn alt small" id="bBack">Back</button><button class="btn" id="bReady">READY</button></div>`;
     $("bBack").onclick = () => show("home");
@@ -670,7 +698,9 @@ function setMode(m) {
     msg.innerHTML = t;
     body.innerHTML = `<button class="btn" id="bMark">MARK LANDING SPOT</button>
       <div class="row">${S.traceBearing != null ? '<button class="btn alt small" id="bUseTrace">Use trace</button>' : ""}
-      <button class="btn alt small" id="bStraight">It went straight</button></div>`;
+      <button class="btn alt small" id="bStraight">It went straight</button></div>
+      ${S.range ? '<button class="btn alt small" id="bNotOurs">Not our shot / skip</button>' : ""}`;
+    if ($("bNotOurs")) $("bNotOurs").onclick = () => setMode("setup");
     $("bMark").onclick = () => { const h = trueHeading(); if (h == null) { msg.innerHTML = "No compass reading yet — move the phone in a figure 8, then try again."; return; } S.markBearing = h; toDistance(); };
     if ($("bUseTrace")) $("bUseTrace").onclick = () => { S.markBearing = S.traceBearing; toDistance(); };
     $("bStraight").onclick = () => { S.markBearing = S.impactHeading ?? trueHeading(); toDistance(); };
@@ -698,9 +728,31 @@ function setMode(m) {
     $("bLong").onclick = () => { S.dist = Math.round(base() * 1.1); upd(); };
     $("bFind").onclick = makeShot;
   }
-  const cs = $("clubSel"); if (cs && m !== "distance") cs.onchange = e => { cfg.club = e.target.value; saveCfg(); };
+  else if (m === "rdist") {
+    const tgt = S.rangeTarget ?? S.impactHeading ?? S.markBearing;
+    const ang = norm180(S.markBearing - tgt);
+    msg.innerHTML = `How far did it carry? Use the range flags. <span style="color:var(--y)">${Math.abs(ang) < 1 ? "On line" : Math.abs(Math.round(ang)) + "° " + (ang > 0 ? "right" : "left")}</span>`;
+    body.innerHTML = `${clubSel()}
+      <div class="distbox"><button class="btn alt" id="bM10">−10</button><button class="btn alt" id="bM5">−5</button><div class="val" id="dVal"></div><button class="btn alt" id="bP5">+5</button><button class="btn alt" id="bP10">+10</button></div>
+      <div class="row"><button class="btn alt small" id="bSkip">Skip</button><button class="btn go" id="bLog">LOG SHOT</button></div>`;
+    const upd = () => $("dVal").textContent = S.dist;
+    S.dist = clubCarry(cfg.club); upd();
+    $("clubSel").onchange = e => { cfg.club = e.target.value; saveCfg(); S.dist = clubCarry(cfg.club); upd(); };
+    [["bM10", -10], ["bM5", -5], ["bP5", 5], ["bP10", 10]].forEach(([id, d]) => $(id).onclick = () => { S.dist = Math.max(5, S.dist + d); upd(); });
+    $("bSkip").onclick = () => setMode("setup");
+    $("bLog").onclick = () => {
+      const side = Math.round(S.dist * Math.sin(rad(ang)));
+      cfg.rangeShots.push({ club: cfg.club, carry: S.dist, side, t: Date.now() });
+      if (cfg.rangeShots.length > 600) cfg.rangeShots.splice(0, cfg.rangeShots.length - 600);
+      saveCfg();
+      say(`${cfg.club}, ${S.dist}, ${side === 0 ? "on line" : Math.abs(side) + (side > 0 ? " right" : " left")}.`);
+      beep(1300, 0.08);
+      setMode("setup");
+    };
+  }
+  const cs = $("clubSel"); if (cs && m !== "distance" && m !== "rdist") cs.onchange = e => { cfg.club = e.target.value; saveCfg(); };
 }
-function toDistance() { setMode("distance"); }
+function toDistance() { setMode(S.range ? "rdist" : "distance"); }
 
 function makeShot() {
   let start = S.impactPos || S.pos;
@@ -733,6 +785,16 @@ function drawOverlay() {
     octx.fillText("ball", b[0] + 28, b[1] + 6);
     // target line
     octx.globalAlpha = 0.5; octx.beginPath(); octx.moveTo(b[0], b[1] - 26); octx.lineTo(W * 0.5, H * 0.12); octx.stroke(); octx.globalAlpha = 1;
+  }
+  // range: show the target line so the friend can see left/right of it
+  if (S.range && S.rangeTarget != null && trueHeading() != null) {
+    const rel = norm180(S.rangeTarget - trueHeading());
+    if (Math.abs(rel) < hfov() / 2) {
+      const f = (VW / 2) / Math.tan(rad(hfov() / 2)), sx = v2s(m, VW / 2 + f * Math.tan(rad(rel)), 0)[0];
+      octx.strokeStyle = "#FFD60A"; octx.lineWidth = 3; octx.setLineDash([10, 10]);
+      octx.beginPath(); octx.moveTo(sx, H * 0.1); octx.lineTo(sx, H * 0.7); octx.stroke(); octx.setLineDash([]);
+      octx.fillStyle = "#FFD60A"; octx.font = "bold 18px system-ui"; octx.fillText("target", sx + 6, H * 0.1 + 18);
+    } else { octx.fillStyle = "#FFD60A"; octx.font = "bold 22px system-ui"; octx.fillText(rel > 0 ? "target →" : "← target", rel > 0 ? W - 110 : 10, H * 0.3); }
   }
   // trace
   if (S.track.length) {
@@ -798,30 +860,53 @@ function featKind(t) {
   if (g === "hole") return "hole";
   return null;
 }
+// download golf features (greens, fairways, bunkers, water, hole lines) in a box around a point
+async function fetchFeats(t, d) {
+  const bb = `${t.lat - d},${t.lon - d * 1.4},${t.lat + d},${t.lon + d * 1.4}`;
+  const q = `[out:json][timeout:40];(way["golf"](${bb});relation["golf"](${bb});way["natural"~"water|sand"](${bb});relation["natural"="water"](${bb}););out geom;`;
+  const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q),
+    headers: { "Content-Type": "application/x-www-form-urlencoded" } });
+  if (!r.ok) throw new Error("map server busy (" + r.status + ")");
+  const j = await r.json(), out = [], r6 = v => Math.round(v * 1e6) / 1e6;
+  for (const el of j.elements || []) {
+    const kind = featKind(el.tags || {}); if (!kind) continue;
+    const rings = [];
+    if (el.type === "way" && el.geometry) rings.push(el.geometry.map(p => [r6(p.lat), r6(p.lon)]));
+    if (el.type === "relation" && el.members) el.members.forEach(m => { if (m.role !== "inner" && m.geometry) rings.push(m.geometry.map(p => [r6(p.lat), r6(p.lon)])); });
+    rings.forEach(ring => out.push({ kind, ring, ref: (el.tags || {}).ref, par: (el.tags || {}).par }));
+  }
+  return out;
+}
+// save a course's map on the phone so it works with weak signal on the course
+async function cacheCourse(c) {
+  const feats = await fetchFeats({ lat: c.lat, lon: c.lon }, 0.014);   // ~3 km square
+  c.feats = feats; c.featsT = Date.now();
+  if (!saveCfg()) { delete c.feats; saveCfg(); throw new Error("not enough phone storage"); }
+  COURSE.center = null; COURSE.status = ""; COURSE.savedId = null;   // pick up the saved copy next time
+  return feats.length;
+}
 async function loadCourse(center) {
   const t = center || (S.shot && S.shot.target); if (!t) return;
   if (COURSE.status === "loading") return;
+  // 1) a saved course map covering this spot
+  const saved = cfg.courses.find(c => c.feats && geoDist(c, t) < 1800);
+  if (saved) {
+    if (COURSE.savedId !== saved.id) {
+      COURSE.savedId = saved.id; COURSE.center = { lat: saved.lat, lon: saved.lon };
+      COURSE.feats = saved.feats; COURSE.status = saved.feats.length ? "ok" : "empty";
+      showLie(true); if ($("mapScr").classList.contains("on")) drawMap();
+    }
+    return;
+  }
+  COURSE.savedId = null;
+  // 2) otherwise download live around where you are
   if (COURSE.center && geoDist(COURSE.center, t) < 400) {           // already have this area
     if (COURSE.status !== "error" || Date.now() - COURSE.lastTry < 30000) return;
   }
   COURSE.center = { lat: t.lat, lon: t.lon }; COURSE.lastTry = Date.now();
   COURSE.feats = []; COURSE.status = "loading";
-  const d = 0.009; // ~1 km box around the ball
-  const bb = `${t.lat - d},${t.lon - d * 1.4},${t.lat + d},${t.lon + d * 1.4}`;
-  const q = `[out:json][timeout:25];(way["golf"](${bb});relation["golf"](${bb});way["natural"~"water|sand"](${bb});relation["natural"="water"](${bb}););out geom;`;
-  try {
-    const r = await fetch("https://overpass-api.de/api/interpreter", { method: "POST", body: "data=" + encodeURIComponent(q),
-      headers: { "Content-Type": "application/x-www-form-urlencoded" } });
-    const j = await r.json();
-    for (const el of j.elements || []) {
-      const kind = featKind(el.tags || {}); if (!kind) continue;
-      const rings = [];
-      if (el.type === "way" && el.geometry) rings.push(el.geometry.map(p => [p.lat, p.lon]));
-      if (el.type === "relation" && el.members) el.members.forEach(m => { if (m.role !== "inner" && m.geometry) rings.push(m.geometry.map(p => [p.lat, p.lon])); });
-      rings.forEach(ring => COURSE.feats.push({ kind, ring, ref: (el.tags || {}).ref, par: (el.tags || {}).par }));
-    }
-    COURSE.status = COURSE.feats.length ? "ok" : "empty";
-  } catch (e) { COURSE.status = "error"; }
+  try { COURSE.feats = await fetchFeats(t, 0.009); COURSE.status = COURSE.feats.length ? "ok" : "empty"; }
+  catch (e) { COURSE.status = "error"; }
   showLie(true);
   if ($("mapScr").classList.contains("on")) drawMap();
 }
@@ -1057,6 +1142,7 @@ $("bNext").onclick = () => { S.shot = null; try { localStorage.removeItem("bs_sh
 async function openFilm() {
   show("film");
   S.ballV = null; S.track = []; S.traceBearing = null; S.markBearing = null; S.impactPos = null;
+  $("mini").style.display = S.range ? "none" : "";
   setMode("setup");
   const ok = await startCamera();
   if (!ok) {
@@ -1068,6 +1154,7 @@ async function openFilm() {
   }
 }
 $("bStart").onclick = async () => {
+  S.range = false;
   $("bStart").textContent = "Starting…"; $("homeErr").textContent = "";
   try { await withTimeout(startSensors(), 5000); } catch (e) {}
   $("bStart").textContent = "START";
@@ -1108,10 +1195,78 @@ $("bSaveSettings").onclick = () => {
   const ok = saveCfg(); flash("setStatus", ok);
   if (ok) setTimeout(() => show("home"), 700);
 };
+/* ---------- driving range ---------- */
+$("bRange").onclick = async () => {
+  S.range = true; S.rangeTarget = null; S.rangeStart = Date.now();
+  $("homeErr").textContent = "";
+  try { await withTimeout(startSensors(), 5000); } catch (e) {}
+  openFilm().catch(e => showErr("camera: " + e.message));
+};
+function rangeList() {
+  const club = $("rClub").value, when = $("rWhen").value;
+  return cfg.rangeShots.filter(s => (club === "*" || s.club === club) && (when === "a" || s.t > (S.rangeStart || 0)));
+}
+function renderRange() {
+  const clubs = [...new Set(cfg.rangeShots.map(s => s.club))];
+  const prev = $("rClub").value;
+  $("rClub").innerHTML = `<option value="*">All clubs</option>` + clubs.map(c => `<option${c === (prev || cfg.club) ? " selected" : ""}>${esc(c)}</option>`).join("");
+  if (prev === "*") $("rClub").value = "*";
+  if (!S.rangeStart) $("rWhen").value = "a";
+  const list = rangeList();
+  // table per club
+  const by = {};
+  list.forEach(s => (by[s.club] = by[s.club] || []).push(s));
+  const avg = a => a.reduce((x, y) => x + y, 0) / a.length;
+  const sd = a => { const m = avg(a); return Math.sqrt(avg(a.map(v => (v - m) ** 2))); };
+  const lr = v => Math.abs(v) < 1 ? "On line" : Math.round(Math.abs(v)) + (v > 0 ? " R" : " L");
+  let h = `<tr style="color:var(--y)"><th>Club</th><th>Shots</th><th>Carry</th><th>Avg L/R</th><th>Spread</th></tr>`;
+  Object.keys(by).forEach(k => { const a = by[k];
+    h += `<tr><td>${esc(k)}</td><td>${a.length}</td><td><b>${Math.round(avg(a.map(s => s.carry)))}</b></td><td>${lr(avg(a.map(s => s.side)))}</td><td>±${Math.round(sd(a.map(s => s.side)))}</td></tr>`; });
+  $("rTbl").innerHTML = list.length ? h : `<tr><td>No shots yet.</td></tr>`;
+  $("rNote").textContent = "Carry and spread are in yards. Spread = how far left/right shots usually scatter. Range balls often fly 5–10% shorter than your real ball.";
+  // plot: target line up the middle, you at the bottom
+  const cv = $("rPlot"), dpr = window.devicePixelRatio || 1, W = cv.clientWidth, H = cv.clientHeight;
+  cv.width = W * dpr; cv.height = H * dpr;
+  const x = cv.getContext("2d"); x.setTransform(dpr, 0, 0, dpr, 0, 0); x.clearRect(0, 0, W, H);
+  const maxC = Math.max(100, ...list.map(s => s.carry)) * 1.1, sc = (H - 30) / maxC, ox = W / 2, oy = H - 14;
+  x.strokeStyle = "#ffffff33"; x.fillStyle = "#bbb"; x.font = "13px system-ui"; x.lineWidth = 1;
+  for (let d = 50; d < maxC; d += 50) { const y = oy - d * sc; x.beginPath(); x.moveTo(0, y); x.lineTo(W, y); x.stroke(); x.fillText(d + " yd", 4, y - 3); }
+  x.strokeStyle = "#FFD60A"; x.setLineDash([6, 6]); x.beginPath(); x.moveTo(ox, oy); x.lineTo(ox, 6); x.stroke(); x.setLineDash([]);
+  const cols = ["#FFD60A", "#3BE37A", "#4DA3FF", "#FF5A4E", "#F2A6FF", "#FFFFFF", "#FF9F40"];
+  list.forEach(s => { x.fillStyle = cols[clubs.indexOf(s.club) % cols.length]; x.beginPath();
+    x.arc(clamp(ox + s.side * sc, 6, W - 6), oy - s.carry * sc, 6, 0, Math.PI * 2); x.fill(); });
+  x.fillStyle = "#2D7DFF"; x.beginPath(); x.arc(ox, oy, 7, 0, Math.PI * 2); x.fill();
+}
+$("rClub").onchange = renderRange; $("rWhen").onchange = renderRange;
+$("bRBack").onclick = () => { if (S.range) { show("film"); setMode("setup"); startCamera(); } else show("home"); };
+$("bRLearn").onclick = () => {
+  const b = $("bRLearn");
+  if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Add these shots?"; setTimeout(() => { b.dataset.sure = ""; b.textContent = "Teach my clubs"; }, 3000); return; }
+  let n = 0;
+  rangeList().forEach(s => { if (s.learned) return; const c = cfg.clubs.find(c => c[0] === s.club); if (!c) return;
+    const k = c[3] || 0; c[2] = k ? (c[2] * k + s.carry) / (k + 1) : s.carry; c[3] = k + 1; s.learned = true; n++; });
+  saveCfg(); b.dataset.sure = ""; b.textContent = n ? `Added ${n} shots ✓` : "Nothing new to add";
+};
+$("bRClear").onclick = () => {
+  const b = $("bRClear");
+  if (b.dataset.sure !== "1") { b.dataset.sure = "1"; b.textContent = "Clear shown shots?"; setTimeout(() => { b.dataset.sure = ""; b.textContent = "Clear"; }, 3000); return; }
+  const gone = new Set(rangeList()); cfg.rangeShots = cfg.rangeShots.filter(s => !gone.has(s)); saveCfg();
+  b.dataset.sure = ""; b.textContent = "Clear"; renderRange();
+};
+
 /* ---------- course picker ---------- */
 function renderCourses() {
   const cc = curCourse();
   $("courseCur").textContent = cc ? cc.name : "No course selected";
+  const ms = $("mapState"), dl = $("bDlMap");
+  dl.style.display = cc ? "" : "none";
+  if (!cc) ms.textContent = "";
+  else if (!cc.feats) { ms.textContent = "Map not saved yet. It will load live on the course, or download it now."; ms.style.color = "var(--dim)"; dl.textContent = "Download course map"; }
+  else {
+    const g = cc.feats.filter(f => f.kind === "green").length, h = cc.feats.filter(f => f.kind === "hole").length;
+    ms.textContent = cc.feats.length ? `Map saved ✓ ${g} greens, ${h} hole lines, ${cc.feats.length - g - h} other features` : "Map saved, but this course has no outlines on OpenStreetMap yet.";
+    ms.style.color = cc.feats.length && g ? "var(--ok)" : "var(--bad)"; dl.textContent = "Update course map";
+  }
   $("courseSaved").innerHTML = cfg.courses.map((c, i) =>
     `<div class="row"><button class="btn ${c.id === cfg.courseId ? "" : "alt"} small" data-ci="${i}" style="flex:5">${c.id === cfg.courseId ? "✓ " : ""}${esc(c.name)}</button>
      <button class="btn alt small" data-cdel="${i}" style="flex:1">✕</button></div>`).join("");
@@ -1132,7 +1287,9 @@ function showResults(list) {
     if (!c) { c = { id: "c" + Date.now(), name: r.name, lat: r.lat, lon: r.lon, card: null }; cfg.courses.push(c); }
     cfg.courseId = c.id; cfg.curHole = 1; saveCfg();
     $("courseResults").innerHTML = ""; $("courseMsg").textContent = "Selected. Open Scorecard to fill in par and yards if they're blank.";
-    renderCourses(); });
+    renderCourses();
+    if (!c.feats) $("bDlMap").click();   // save its map right away
+  });
 }
 function getHere() {
   return new Promise((res, rej) => {
@@ -1168,6 +1325,12 @@ $("bCourseQ").onclick = async () => {
     $("courseMsg").textContent = list.length ? "Tap your course:" : "Nothing found. Try the town name, or 'Courses near me'.";
     showResults(list);
   } catch (e) { $("courseMsg").textContent = "Couldn't search (no signal?)."; }
+};
+$("bDlMap").onclick = async () => {
+  const c = curCourse(); if (!c) return;
+  $("mapState").textContent = "Downloading map…"; $("mapState").style.color = "var(--dim)";
+  try { await cacheCourse(c); renderCourses(); }
+  catch (e) { $("mapState").textContent = "Couldn't download: " + (e.message || "no signal") + ". Try again on Wi-Fi."; $("mapState").style.color = "var(--bad)"; }
 };
 $("bCourse").onclick = () => { renderCourses(); $("courseResults").innerHTML = ""; $("courseMsg").textContent = ""; show("courses"); };
 
